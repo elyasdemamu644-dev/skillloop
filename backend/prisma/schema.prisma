@@ -1,0 +1,617 @@
+// SkillLoop database schema
+// Phase 1: foundation (User model).
+// Phase 2: authentication (RefreshToken, PasswordResetToken).
+// Phase 3: skills system (SkillCategory, Skill, UserSkill).
+// Phase 5: skill offerings (SkillOffering).
+// Phase 6: skill exchange requests (SkillExchange).
+// Phase 7: sessions (Availability, Session).
+// Phase 8: messaging (Conversation, Message).
+// Phase 9: learning (LearningPlan, Challenge, ChallengeSubmission, Feedback).
+// Phase 10: reputation (Review, Achievement, UserAchievement).
+// Phase 11: notifications (Notification).
+// Phase 13: payments (Payment).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  avatar       String?
+  bio          String?
+  location     String?
+  timezone     String?  @default("UTC")
+  isVerified   Boolean  @default(false)
+  isAdmin      Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  walletBalance Int      @default(0) // skill credits wallet (Phase 13)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  userSkills          UserSkill[]
+  skillOfferings      SkillOffering[]
+  requestedExchanges  SkillExchange[] @relation("RequesterExchanges")
+  providedExchanges   SkillExchange[] @relation("ProviderExchanges")
+  availabilities      Availability[]
+  learnerSessions     Session[]       @relation("LearnerSessions")
+  teacherSessions     Session[]       @relation("TeacherSessions")
+  conversationsStarted Conversation[] @relation("ConversationStarter")
+  conversationsParticipated Conversation[] @relation("ConversationParticipant")
+  sentMessages        Message[]       @relation("SentMessages")
+  plansOwned          LearningPlan[]  @relation("PlanOwner")
+  plansAuthored       LearningPlan[]  @relation("PlanAuthor")
+  challengeSubmissions ChallengeSubmission[] @relation("ChallengeSubmissions")
+  submissionsReviewed ChallengeSubmission[] @relation("SubmissionReviewer")
+  feedbackAuthored    Feedback[]      @relation("FeedbackAuthor")
+  feedbackReceived    Feedback[]      @relation("FeedbackRecipient")
+  reviewsWritten      Review[]        @relation("ReviewAuthor")
+  reviewsReceived     Review[]        @relation("ReviewRecipient")
+  achievements        UserAchievement[]
+  notifications       Notification[]
+  paymentsMade        Payment[]       @relation("PaymentsMade")
+  paymentsReceived    Payment[]       @relation("PaymentsReceived")
+  teacherMaterials    Material[]      @relation("TeacherMaterials")
+  materialPurchases   MaterialPurchase[] @relation("MaterialBuyers")
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+// One row per issued refresh token (one per logged-in device/session).
+// Tokens are rotated on every /api/auth/refresh call and revoked on logout,
+// which lets a compromised token be invalidated without affecting other
+// sessions and without needing to change JWT_SECRET.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jti       String    @unique // matches the "jti" claim inside the refresh JWT
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Short-lived tokens for the forgot-password / reset-password flow.
+// Only the SHA-256 hash of the token is stored, never the raw token.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ─── Phase 3: Skills system ────────────────────────────────────────────────
+// A "teach / learn" relationship between a user and a skill, used both for
+// profiles and for the matching engine in later phases.
+
+enum SkillType {
+  TEACH
+  LEARN
+  BOTH
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum OfferingMode {
+  ONLINE
+  IN_PERSON
+  BOTH
+}
+
+enum ExchangeStatus {
+  REQUESTED
+  ACCEPTED
+  REJECTED
+  COMPLETED
+}
+
+// Top-level grouping for the skill catalog (Technology, Languages, ...).
+model SkillCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  skills Skill[]
+
+  @@map("skill_categories")
+}
+
+// A global, reusable skill in the catalog. Skills are shared across all
+// users (a user's relationship to a skill lives in UserSkill instead).
+model Skill {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  slug        String        @unique
+  description String?
+  categoryId  String
+  category    SkillCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  userSkills UserSkill[]
+  offerings  SkillOffering[]
+  learningPlans LearningPlan[]
+  materials  Material[]
+
+  @@index([categoryId])
+  @@index([name])
+  @@map("skills")
+}
+
+// A user's personal relationship to a skill: what they teach / want to learn.
+// Deleting a User leaves their skill entries behind cleanup via Cascade;
+// deleting a Skill from the catalog is Restrict so a shared catalog entry
+// can never silently destroy many users' profiles.
+model UserSkill {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId         String
+  skill           Skill     @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  type            SkillType
+  level           SkillLevel
+  yearsExperience Int       @default(0)
+  description     String?
+  isVerified      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, skillId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+// Phase 5: a user's public, searchable teaching offer for a catalog skill.
+model SkillOffering {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId      String
+  skill        Skill        @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  title        String
+  description  String
+  level        SkillLevel
+  mode         OfferingMode @default(ONLINE)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  exchanges    SkillExchange[]
+
+  @@index([skillId, isActive])
+  @@index([userId])
+  @@map("skill_offerings")
+}
+
+// Phase 6: a learner's request to work with the owner of an offering.
+model SkillExchange {
+  id          String         @id @default(cuid())
+  requesterId String
+  requester   User           @relation("RequesterExchanges", fields: [requesterId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    User           @relation("ProviderExchanges", fields: [providerId], references: [id], onDelete: Cascade)
+  offeringId  String
+  offering    SkillOffering  @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  message     String?
+  status      ExchangeStatus @default(REQUESTED)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  completedAt DateTime?
+
+  sessions Session[]
+
+  conversations Conversation[]
+
+  feedbacks Feedback[]
+
+  learningPlans LearningPlan[]
+
+  reviews Review[]
+
+  payments Payment[]
+
+  @@unique([requesterId, offeringId])
+  @@index([providerId, status])
+  @@index([requesterId, status])
+  @@map("skill_exchanges")
+}
+
+// ─── Phase 7: Sessions ──────────────────────────────────────────────────────
+// A teacher's free time slots, either recurring by day of week or one-off.
+// Used by the booking UI — learners pick from these when proposing a session.
+
+enum SessionStatus {
+  PROPOSED
+  CONFIRMED
+  DECLINED
+  CANCELLED
+  COMPLETED
+}
+
+model Availability {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayOfWeek Int? // 0 (Sunday) .. 6 (Saturday) — set for a recurring weekly slot
+  date      DateTime? // set for a one-off slot (takes precedence over the weekday)
+  startTime String // "HH:mm" (24h)
+  endTime   String   // "HH:mm" (24h)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@map("availabilities")
+}
+
+// A scheduled session between a learner and a teacher, always linked to an
+// accepted exchange so it inherits the skill/offering context. Sessions are
+// proposed by either participant and confirmed by the other.
+model Session {
+  id          String        @id @default(cuid())
+  exchangeId  String
+  exchange    SkillExchange @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  learnerId   String
+  learner     User          @relation("LearnerSessions", fields: [learnerId], references: [id], onDelete: Cascade)
+  teacherId   String
+  teacher     User          @relation("TeacherSessions", fields: [teacherId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  endTime     DateTime
+  status      SessionStatus @default(PROPOSED)
+  meetingLink String?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  reviews Review[]
+
+  @@index([exchangeId])
+  @@index([learnerId, status])
+  @@index([teacherId, status])
+  @@map("sessions")
+}
+
+// ─── Phase 8: Messaging ─────────────────────────────────────────────────────
+// A private, two-person conversation. Reused if a pair already chats; an
+// optional exchangeId gives context (e.g. messages attached to an exchange).
+
+model Conversation {
+  id            String          @id @default(cuid())
+  starterId     String
+  starter       User            @relation("ConversationStarter", fields: [starterId], references: [id], onDelete: Cascade)
+  participantId String
+  participant   User            @relation("ConversationParticipant", fields: [participantId], references: [id], onDelete: Cascade)
+  exchangeId    String?
+  exchange      SkillExchange?  @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  messages Message[]
+
+  @@index([participantId])
+  @@index([exchangeId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// ─── Phase 9: Learning ──────────────────────────────────────────────────────
+// A learning plan is owned by the learner and usually authored by their
+// teacher (from an exchange). Plans contain challenges (tasks/quiz/project)
+// that the learner submits; the teacher reviews and gives feedback.
+
+enum PlanStatus {
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+enum ChallengeType {
+  TASK
+  QUIZ
+  PROJECT
+  MILESTONE
+}
+
+enum ChallengeDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model LearningPlan {
+  id          String         @id @default(cuid())
+  ownerId     String
+  owner       User           @relation("PlanOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  authorId    String?
+  author      User?          @relation("PlanAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  skillId     String?
+  skill       Skill?         @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  exchangeId  String?
+  exchange    SkillExchange? @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  title       String
+  description String
+  goals       String?
+  status      PlanStatus     @default(IN_PROGRESS)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  challenges Challenge[]
+
+  @@index([ownerId])
+  @@index([authorId])
+  @@map("learning_plans")
+}
+
+model Challenge {
+  id              String               @id @default(cuid())
+  planId          String
+  plan            LearningPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  type            ChallengeType        @default(TASK)
+  difficulty      ChallengeDifficulty  @default(MEDIUM)
+  dueDate         DateTime?
+  order           Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  submissions ChallengeSubmission[]
+
+  @@index([planId])
+  @@map("challenges")
+}
+
+model ChallengeSubmission {
+  id            String           @id @default(cuid())
+  challengeId   String
+  challenge     Challenge        @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  submitterId   String
+  submitter     User             @relation("ChallengeSubmissions", fields: [submitterId], references: [id], onDelete: Cascade)
+  content       String
+  attachmentUrl String?
+  status        SubmissionStatus @default(SUBMITTED)
+  feedback      String?
+  submittedAt   DateTime         @default(now())
+  reviewedAt    DateTime?
+  reviewerId    String?
+  reviewer      User?            @relation("SubmissionReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  feedbacks Feedback[]
+
+  @@index([challengeId])
+  @@map("challenge_submissions")
+}
+
+model Feedback {
+  id           String                 @id @default(cuid())
+  authorId     String
+  author       User                   @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  recipientId  String
+  recipient    User                   @relation("FeedbackRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  exchangeId   String?
+  exchange     SkillExchange?         @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  submissionId String?
+  submission   ChallengeSubmission?   @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  rating       Int?
+  content      String
+  createdAt    DateTime               @default(now())
+
+  @@index([recipientId])
+  @@map("feedbacks")
+}
+
+// ─── Phase 10: Reputation ───────────────────────────────────────────────────
+// Peer reviews left after an exchange or session, plus achievements/badges
+// that are awarded for milestones (first lesson, N sessions, good ratings…).
+
+model Review {
+  id          String         @id @default(cuid())
+  authorId    String
+  author      User           @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   User           @relation("ReviewRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  exchangeId  String?
+  exchange    SkillExchange? @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  session     Session?       @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  rating      Int // 1 (poor) .. 5 (excellent)
+  content     String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([authorId, exchangeId])
+  @@index([recipientId])
+  @@index([authorId])
+  @@index([exchangeId])
+  @@map("reviews")
+}
+
+model Achievement {
+  id          String              @id @default(cuid())
+  name        String              @unique
+  description String
+  icon        String?
+  category    String // e.g. "teaching", "learning", "sessions", "community"
+  tier        Int                 @default(1) // 1 = bronze, 2 = silver, 3 = gold
+  points      Int                 @default(10)
+  criteria    Json // logic used to decide when the badge is earned
+  createdAt   DateTime            @default(now())
+
+  users UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@map("user_achievements")
+}
+
+// ─── Phase 11: Notifications ────────────────────────────────────────────────
+// In-app notifications delivered via socket push (real time) and REST (for
+// polling/refresh). `data` carries a client-side route, e.g. { href: "/messages" }.
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // e.g. "message", "session", "exchange", "review", "badge"
+  title     String
+  body      String?
+  data      Json? // optional client hint, e.g. { href }
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// ─── Phase 13: Payments ─────────────────────────────────────────────────────
+// Amounts are integer skill credits. A payment is either a wallet top-up
+// (no recipient) or a transfer from learner to teacher, optionally linked to
+// an accepted exchange. Mock gateway: completing/refunding just adjusts the
+// wallet balances so the whole loop can be exercised without a real PSP.
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CREDITS // paid straight from the wallet
+  CARD // mock card top-up
+  MANUAL // admin-approved balance credit / offline payment
+}
+
+model Payment {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation("PaymentsMade", fields: [userId], references: [id], onDelete: Cascade)
+  recipientId String?
+  recipient   User?          @relation("PaymentsReceived", fields: [recipientId], references: [id], onDelete: SetNull)
+  exchangeId  String?
+  exchange    SkillExchange? @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  amount      Int
+  currency    String         @default("SKILL")
+  status      PaymentStatus  @default(PENDING)
+  method      PaymentMethod  @default(CREDITS)
+  description String?
+  completedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  materialId String?
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  purchase   MaterialPurchase?
+
+  @@index([userId])
+  @@index([recipientId])
+  @@map("payments")
+}
+
+// ─── Phase 15: Materials marketplace ────────────────────────────────────────
+// Teachers publish learning resources (uploaded files and external links)
+// priced in skill credits. Buying a material transfers credits to the
+// teacher immediately and permanently unlocks the files and links for the
+// buyer. Physical files live under backend/uploads/materials and are only
+// ever served through the authenticated download endpoint.
+
+model Material {
+  id          String   @id @default(cuid())
+  teacherId   String
+  teacher     User     @relation("TeacherMaterials", fields: [teacherId], references: [id], onDelete: Cascade)
+  skillId     String?
+  skill       Skill?   @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  title       String
+  description String
+  price       Int // skill credits
+  fileNames   String[] // stored filenames under backend/uploads/materials
+  links       String[] // external resource URLs
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchases MaterialPurchase[]
+  payments  Payment[]
+
+  @@index([teacherId])
+  @@index([skillId])
+  @@index([isActive])
+  @@map("materials")
+}
+
+model MaterialPurchase {
+  id         String   @id @default(cuid())
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  buyerId    String
+  buyer      User     @relation("MaterialBuyers", fields: [buyerId], references: [id], onDelete: Cascade)
+  paymentId  String   @unique
+  payment    Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  pricePaid  Int
+  createdAt  DateTime @default(now())
+
+  @@unique([materialId, buyerId])
+  @@index([buyerId])
+  @@map("material_purchases")
+}
