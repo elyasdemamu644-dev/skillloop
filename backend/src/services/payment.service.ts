@@ -324,6 +324,12 @@ export async function refundPayment(userId: string, paymentId: string) {
       });
     }
 
+    // Revoking access belongs to the same transaction as the refund: a refund
+    // must never complete while the buyer still has the material.
+    if (payment.materialId) {
+      await tx.materialPurchase.deleteMany({ where: { paymentId: payment.id } });
+    }
+
     const refunded = await tx.payment.update({
       where: { id: payment.id },
       data: { status: "REFUNDED" },
@@ -333,11 +339,6 @@ export async function refundPayment(userId: string, paymentId: string) {
   });
 
   if (outcome.kind === "conflict") throw new ApiError(409, "This payment has already been refunded");
-
-  // A refund of a material purchase revokes access in the buyer's library.
-  if (payment.materialId) {
-    await prisma.materialPurchase.deleteMany({ where: { paymentId: payment.id } });
-  }
 
   if (payment.recipientId) {
     await createNotification({

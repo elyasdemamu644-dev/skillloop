@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
+import { ZodError } from "zod";
 import { env } from "../config/env";
 
 export class ApiError extends Error {
@@ -68,6 +69,18 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
   if (prismaError) {
     // Expected domain conflicts are logged at info level, not as crashes.
     res.status(prismaError.statusCode).json({ success: false, message: prismaError.message });
+    return;
+  }
+
+  // Controllers and services parse query/param schemas directly with Zod.
+  // Without this mapping, a malformed query string (for example ?page=0)
+  // would surface as a 500 instead of a validation error.
+  if (err instanceof ZodError) {
+    res.status(422).json({
+      success: false,
+      message: "Validation failed",
+      errors: err.flatten().fieldErrors,
+    });
     return;
   }
 

@@ -10,6 +10,7 @@ import {
   seedExchange,
   seedSession,
 } from "./helpers";
+import { issueRefreshToken, rotateRefreshToken, RefreshTokenError } from "../src/services/token.service";
 
 describe("account state", () => {
   it("stops accepting a token as soon as the account is deactivated", async () => {
@@ -163,5 +164,37 @@ describe("uploads", () => {
       .attach("files", Buffer.from("MZ"), "payload.exe");
 
     expect(res.status).toBe(415);
+  });
+});
+
+describe("refresh token rotation", () => {
+  it("allows only one concurrent rotation of the same refresh token", async () => {
+    const user = await registerUser();
+    const rawToken = await issueRefreshToken(user.id);
+
+    const results = await Promise.allSettled([
+      rotateRefreshToken(rawToken),
+      rotateRefreshToken(rawToken),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") {
+      expect(rejected.reason).toBeInstanceOf(RefreshTokenError);
+    }
+  });
+});
+
+describe("admin users", () => {
+  it("defaults pagination when only a search term is supplied", async () => {
+    const admin = await registerUser({ firstName: "Admin" });
+    await makeAdmin(admin);
+
+    const res = await request(app).get("/api/admin/users?q=Admin").set(authed(admin));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.pagination).toMatchObject({ page: 1, limit: 20 });
+    expect(Array.isArray(res.body.data.items)).toBe(true);
   });
 });

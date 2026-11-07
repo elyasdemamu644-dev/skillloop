@@ -146,7 +146,8 @@ docker compose up --build
 Migrations run automatically when the API container starts. Both images are
 built from the full Debian-based Node image so no `apt-get` runs during the
 build — Prisma's engine and a possible bcrypt compile both have what they need
-already. CI builds both images on every push; `docker build --check` is clean.
+already. CI builds both images on every pull request and on every push to
+`main`.
 
 To load demo data:
 

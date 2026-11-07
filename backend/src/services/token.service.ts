@@ -68,10 +68,16 @@ export async function rotateRefreshToken(
     throw new RefreshTokenError("User no longer exists or is inactive");
   }
 
-  await prisma.refreshToken.update({
-    where: { id: stored.id },
+  // Claim the token atomically. Without this guard, two concurrent refreshes
+  // could both read `revokedAt: null` and each issue a new token, breaking the
+  // single-use rotation invariant.
+  const claimed = await prisma.refreshToken.updateMany({
+    where: { id: stored.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+  if (claimed.count !== 1) {
+    throw new RefreshTokenError("Refresh token has already been used");
+  }
 
   const [accessToken, refreshToken] = await Promise.all([
     Promise.resolve(signAccessToken(user)),

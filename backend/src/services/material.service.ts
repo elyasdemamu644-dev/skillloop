@@ -177,8 +177,17 @@ export async function updateMaterial(
 }
 
 export async function deleteMaterial(userId: string, materialId: string) {
-  const existing = await prisma.material.findFirst({ where: { id: materialId, teacherId: userId }, select: { id: true, fileNames: true } });
+  const existing = await prisma.material.findFirst({
+    where: { id: materialId, teacherId: userId },
+    select: { id: true, fileNames: true, _count: { select: { purchases: true } } },
+  });
   if (!existing) throw new ApiError(404, "Material not found");
+  if (existing._count.purchases > 0) {
+    throw new ApiError(
+      409,
+      "This material has purchases. Hide it instead of deleting it so buyers keep access."
+    );
+  }
   await prisma.material.delete({ where: { id: existing.id } });
   deleteDiskFiles(existing.fileNames);
 }

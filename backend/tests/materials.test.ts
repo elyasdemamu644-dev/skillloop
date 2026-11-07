@@ -138,4 +138,26 @@ describe("materials", () => {
       .set(authed(buyer));
     expect(blocked.status).toBe(403);
   });
+
+  it("refuses to delete a material that has purchases", async () => {
+    const teacher = await registerUser();
+    const buyer = await registerUser();
+    await topUp(buyer, 100);
+    const material = await publishMaterial(teacher.token, 10);
+
+    const purchase = await request(app)
+      .post(`/api/materials/${material.id}/purchase`)
+      .set(authed(buyer));
+    expect(purchase.status).toBe(201);
+
+    const deletion = await request(app)
+      .delete(`/api/materials/${material.id}`)
+      .set(authed(teacher));
+    expect(deletion.status).toBe(409);
+
+    // The material and the buyer's purchase must survive; the teacher can hide
+    // the material instead of erasing someone else's purchase history.
+    expect(await prisma.material.findUnique({ where: { id: material.id } })).not.toBeNull();
+    expect(await prisma.materialPurchase.count({ where: { materialId: material.id } })).toBe(1);
+  });
 });
