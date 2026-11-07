@@ -453,5 +453,4 @@ Backend:
 
 ## License
 
-No license file yet. Add one before publishing — without it the default is
-"all rights reserved".
+MIT — see [LICENSE](LICENSE).
