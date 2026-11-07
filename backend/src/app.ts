@@ -25,6 +25,13 @@ import { materialsRouter } from "./routes/material.routes";
 export function createApp(): Application {
   const app = express();
 
+  // Behind a reverse proxy (Docker, nginx, Render) the real client IP arrives
+  // in X-Forwarded-For. Without trusting the proxy, express-rate-limit would
+  // bucket every request under the proxy's address instead of per client.
+  if (env.TRUST_PROXY > 0) {
+    app.set("trust proxy", env.TRUST_PROXY);
+  }
+
   // --- Security & parsing middleware ---
   app.use(helmet());
   app.use(

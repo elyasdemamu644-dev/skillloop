@@ -1,10 +1,13 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
-// All requests go through the /api prefix, which Vite proxies to the
-// backend in development (see vite.config.ts) and which a reverse proxy
-// (e.g. Nginx) should handle the same way in production.
+// All requests go through the /api prefix, which Vite proxies to the backend
+// in development (see vite.config.ts) and which a reverse proxy (e.g. Nginx)
+// handles the same way in production. When the API is deployed on its own
+// origin, set VITE_API_URL to its full base, e.g. https://api.example.com/api.
+const API_BASE = import.meta.env.VITE_API_URL?.replace(/\/+$/, "") || "/api";
+
 export const api = axios.create({
-  baseURL: "/api",
+  baseURL: API_BASE,
   withCredentials: true, // sends the httpOnly refresh-token cookie
 });
 
@@ -21,6 +24,16 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+// Called when a refresh fails, i.e. the session is genuinely over (account
+// deactivated, refresh token revoked or expired). AuthContext uses it to drop
+// the signed-in shell instead of leaving the app looking logged in while every
+// request 401s.
+let onSessionExpired: (() => void) | null = null;
+
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler;
+}
+
 api.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -35,7 +48,7 @@ let refreshPromise: Promise<string> | null = null;
 
 async function refreshAccessToken(): Promise<string> {
   const { data } = await axios.post<{ data: { accessToken: string } }>(
-    "/api/auth/refresh",
+    `${API_BASE}/auth/refresh`,
     {},
     { withCredentials: true }
   );
@@ -65,6 +78,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         setAccessToken(null);
+        onSessionExpired?.();
         return Promise.reject(refreshError);
       }
     }

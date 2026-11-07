@@ -100,6 +100,16 @@ export async function createPlan(userId: string, input: CreatePlanInput) {
   }
 
   const exchangeId = input.exchangeId;
+
+  // You may author a plan for someone else only when an exchange connects you
+  // — otherwise any user could inject plans into another user's account.
+  if (input.ownerId !== userId && !exchangeId) {
+    throw new ApiError(
+      403,
+      "You can only create a plan for yourself unless it is tied to an exchange you are both part of"
+    );
+  }
+
   if (exchangeId) {
     const exchange = await prisma.skillExchange.findUnique({
       where: { id: exchangeId },
@@ -301,8 +311,13 @@ export async function reviewSubmission(
 // ─── Feedback ───────────────────────────────────────────────────────────────
 export async function createFeedback(userId: string, input: CreateFeedbackInput) {
   if (input.recipientId === userId) throw new ApiError(400, "You cannot give feedback to yourself");
-  const recipient = await prisma.user.findUnique({ where: { id: input.recipientId }, select: { id: true } });
-  if (!recipient) throw new ApiError(404, "Recipient not found");
+
+  // Feedback must hang off something concrete and go to the counterparty of
+  // that context. Without this, any account can post unlimited feedback onto
+  // any profile with no relationship to it.
+  if (!input.exchangeId && !input.submissionId) {
+    throw new ApiError(422, "Feedback must be attached to an exchange or a submission");
+  }
 
   if (input.exchangeId) {
     const exchange = await prisma.skillExchange.findUnique({
@@ -313,16 +328,29 @@ export async function createFeedback(userId: string, input: CreateFeedbackInput)
     if (![exchange.requesterId, exchange.providerId].includes(userId)) {
       throw new ApiError(403, "Only exchange participants can give feedback");
     }
+    const counterpart = exchange.requesterId === userId ? exchange.providerId : exchange.requesterId;
+    if (input.recipientId !== counterpart) {
+      throw new ApiError(400, "recipientId must be the other participant of the exchange");
+    }
   }
+
   if (input.submissionId) {
     const submission = await prisma.challengeSubmission.findUnique({
       where: { id: input.submissionId },
-      select: { challenge: { select: { plan: { select: { authorId: true, ownerId: true } } } } },
+      select: {
+        submitterId: true,
+        challenge: { select: { plan: { select: { authorId: true, ownerId: true } } } },
+      },
     });
     if (!submission) throw new ApiError(404, "Submission not found");
     const plan = submission.challenge.plan;
     if (![plan.ownerId, plan.authorId].filter(Boolean).includes(userId)) {
       throw new ApiError(403, "Only plan participants can give submission feedback");
+    }
+    const counterpart =
+      userId === submission.submitterId ? plan.authorId ?? plan.ownerId : submission.submitterId;
+    if (input.recipientId !== counterpart) {
+      throw new ApiError(400, "recipientId must be the other party of this submission");
     }
   }
 

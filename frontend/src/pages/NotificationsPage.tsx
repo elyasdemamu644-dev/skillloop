@@ -26,7 +26,12 @@ export default function NotificationsPage() {
 
   const markRead = useMutation({
     mutationFn: markNotificationRead,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["unread-notifications"] }),
+    onSuccess: () => {
+      // Both the list (row styling, unread count in the header) and the navbar
+      // badge depend on this.
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["unread-notifications"] });
+    },
   });
 
   const markAll = useMutation({

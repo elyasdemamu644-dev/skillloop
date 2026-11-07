@@ -50,17 +50,45 @@ function hashString(value: string): number {
   return Math.abs(hash);
 }
 
+// Self-contained placeholders used when a category has no curated photo: a
+// gradient SVG. Keeping them local means the UI never depends on a random-image
+// service (which would also leak every visitor's IP to a third party).
+const FALLBACK_GRADIENTS = [
+  ["#4338ca", "#0ea5e9"],
+  ["#be123c", "#f59e0b"],
+  ["#047857", "#14b8a6"],
+  ["#7c3aed", "#ec4899"],
+] as const;
+
+function fallbackImage(seed: string): string {
+  const [from, to] = FALLBACK_GRADIENTS[hashString(seed || "skillloop") % FALLBACK_GRADIENTS.length];
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">' +
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+    `<stop offset="0%" stop-color="${from}"/><stop offset="100%" stop-color="${to}"/>` +
+    '</linearGradient></defs><rect width="900" height="600" fill="url(#g)"/></svg>';
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 // Deterministic, topic-appropriate photo for a category (or skill) name.
 export function categoryImage(categoryName: string, seed = ""): string {
   const image = CATEGORY_IMAGES[categoryName?.toLowerCase()];
-  if (image) return image;
-  return `https://picsum.photos/seed/${encodeURIComponent(seed || categoryName || "skillloop")}/900/600`;
+  return image ?? fallbackImage(seed || categoryName);
 }
 
-// Stable "real person" avatar, generated deterministically from any id.
-export function avatarFor(seed: string): string {
-  const n = (hashString(seed || "user") % 70) + 1;
-  return `https://i.pravatar.cc/160?img=${n}`;
+// Deterministic gradient for initials-based avatars. Tailwind only emits
+// classes it can see as literal strings, so the palette lives here verbatim.
+const AVATAR_GRADIENTS = [
+  "from-rose-500 to-orange-400",
+  "from-sky-500 to-indigo-500",
+  "from-emerald-500 to-teal-400",
+  "from-violet-500 to-fuchsia-500",
+  "from-amber-500 to-pink-500",
+  "from-cyan-500 to-blue-500",
+] as const;
+
+export function avatarGradient(seed: string): string {
+  return AVATAR_GRADIENTS[hashString(seed || "user") % AVATAR_GRADIENTS.length];
 }
 
 export function userInitials(firstName?: string | null, lastName?: string | null): string {

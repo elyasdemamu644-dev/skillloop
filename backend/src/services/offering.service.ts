@@ -82,5 +82,17 @@ export async function updateOffering(userId: string, offeringId: string, input: 
 export async function deleteOffering(userId: string, offeringId: string) {
   const existing = await prisma.skillOffering.findFirst({ where: { id: offeringId, userId }, select: { id: true } });
   if (!existing) throw new ApiError(404, "Offering not found");
+
+  // Exchanges cascade from the offering, and sessions cascade from exchanges,
+  // so a hard delete would silently erase the other party's history. Retire
+  // the offering instead (PATCH with isActive: false).
+  const exchanges = await prisma.skillExchange.count({ where: { offeringId: existing.id } });
+  if (exchanges > 0) {
+    throw new ApiError(
+      409,
+      "This offering already has exchanges. Deactivate it instead of deleting it, so the learners' history is preserved."
+    );
+  }
+
   await prisma.skillOffering.delete({ where: { id: existing.id } });
 }

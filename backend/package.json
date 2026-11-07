@@ -12,6 +12,10 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "grant-admin": "tsx scripts/grant-admin.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },
@@ -37,12 +41,15 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^20.14.9",
+    "@types/supertest": "^7.2.1",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "eslint": "^8.57.0",
     "prettier": "^3.3.2",
     "prisma": "^5.19.1",
+    "supertest": "^7.3.2",
     "tsx": "^4.16.2",
-    "typescript": "~5.5.3"
+    "typescript": "~5.5.3",
+    "vitest": "^5.1.0"
   }
 }

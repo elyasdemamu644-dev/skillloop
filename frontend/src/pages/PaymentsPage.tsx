@@ -124,8 +124,8 @@ export default function PaymentsPage() {
 
       <section className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Balance" value={formatCredits(wallet.data?.balance ?? 0)} icon={<Wallet className="h-5 w-5" />} sub="available credits" />
-        <StatCard label="Total paid" value={formatCredits(wallet.data?.totalPaid ?? 0)} sub="credits sent out" accent="accent" />
-        <StatCard label="Total received" value={formatCredits(wallet.data?.totalReceived ?? 0)} sub="credits earned" accent="success" />
+        <StatCard label="Total spent" value={formatCredits(wallet.data?.totalDebited ?? 0)} sub="credits sent out" accent="accent" />
+        <StatCard label="Total earned" value={formatCredits(wallet.data?.totalCredited ?? 0)} sub="credits received" accent="success" />
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-2">
@@ -183,6 +183,36 @@ export default function PaymentsPage() {
           ))}
         </div>
       </section>
+
+      {(wallet.data?.recentTransactions.length ?? 0) > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-4 font-display text-lg font-bold text-slate-900">Wallet ledger</h2>
+          <p className="mb-3 text-sm text-slate-500">
+            Every balance change is recorded with the balance it produced.
+          </p>
+          <div className="flex flex-col gap-2">
+            {wallet.data?.recentTransactions.map((entry) => (
+              <div
+                key={entry.id}
+                className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 shadow-soft ring-1 ring-slate-900/5"
+              >
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{entry.description ?? entry.type}</p>
+                  <p className="text-xs text-slate-500">
+                    {new Date(entry.createdAt).toLocaleString()} · balance after {formatCredits(entry.balanceAfter)}
+                  </p>
+                </div>
+                <span
+                  className={`text-sm font-semibold ${entry.amount >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                >
+                  {entry.amount >= 0 ? "+" : ""}
+                  {formatCredits(entry.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
@@ -313,7 +343,9 @@ function PaymentRow({
 
 const STATUS_TONES: Record<PaymentStatus, "success" | "warning" | "danger" | "slate"> = {
   PENDING: "warning",
+  PROCESSING: "warning",
   COMPLETED: "success",
   FAILED: "danger",
+  REFUNDING: "warning",
   REFUNDED: "slate",
 };

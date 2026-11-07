@@ -48,6 +48,7 @@ export default function AvailabilityPage() {
     mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
       updateAvailability(id, { isActive: !isActive }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["my-availability"] }),
+    onError: handleError,
   });
 
   const remove = useMutation({

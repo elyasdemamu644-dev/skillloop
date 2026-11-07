@@ -8,7 +8,7 @@ import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import PageHeader from "@/components/ui/PageHeader";
 import { fetchSkills } from "@/services/skill.api";
-import { createOffering, deleteOffering, fetchMyOfferings } from "@/services/offering.api";
+import { createOffering, deleteOffering, fetchMyOfferings, updateOffering } from "@/services/offering.api";
 import type { CreateOfferingInput, OfferingMode } from "@/types/offering";
 import type { SkillLevel } from "@/types/skill";
 
@@ -24,6 +24,15 @@ export default function OfferingsPage() {
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const skills = useQuery({ queryKey: ["offering-skills"], queryFn: () => fetchSkills(), staleTime: 300000 });
   const offerings = useQuery({ queryKey: ["my-offerings"], queryFn: fetchMyOfferings });
+  function handleError(error: unknown) {
+    setMessage({
+      tone: "error",
+      text: error instanceof AxiosError
+        ? ((error.response?.data as { message?: string } | undefined)?.message ?? "Something went wrong.")
+        : "Something went wrong.",
+    });
+  }
+
   const create = useMutation({
     mutationFn: createOffering,
     onSuccess: () => {
@@ -31,13 +40,28 @@ export default function OfferingsPage() {
       setMessage({ tone: "success", text: "Offering published." });
       queryClient.invalidateQueries({ queryKey: ["my-offerings"] });
     },
-    onError: (error: unknown) =>
-      setMessage({
-        tone: "error",
-        text: error instanceof AxiosError ? ((error.response?.data as { message?: string })?.message ?? "Could not create offering.") : "Could not create offering.",
-      }),
+    onError: handleError,
   });
-  const remove = useMutation({ mutationFn: deleteOffering, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["my-offerings"] }) });
+
+  // An offering with exchanges cannot be deleted (the other party's history
+  // would go with it), so retiring it is the supported path.
+  const toggle = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => updateOffering(id, { isActive }),
+    onSuccess: () => {
+      setMessage({ tone: "success", text: "Offering updated." });
+      queryClient.invalidateQueries({ queryKey: ["my-offerings"] });
+    },
+    onError: handleError,
+  });
+
+  const remove = useMutation({
+    mutationFn: deleteOffering,
+    onSuccess: () => {
+      setMessage({ tone: "success", text: "Offering deleted." });
+      queryClient.invalidateQueries({ queryKey: ["my-offerings"] });
+    },
+    onError: handleError,
+  });
 
   function update<K extends keyof CreateOfferingInput>(key: K, value: CreateOfferingInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -129,14 +153,24 @@ export default function OfferingsPage() {
                   </p>
                   <p className="mt-3 text-sm text-slate-600">{offering.description}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => remove.mutate(offering.id)}
-                  className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                  aria-label={`Delete ${offering.title}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    className="!px-3 !py-1.5 text-xs"
+                    onClick={() => toggle.mutate({ id: offering.id, isActive: !offering.isActive })}
+                    disabled={toggle.isPending}
+                  >
+                    {offering.isActive ? "Hide" : "Publish"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => remove.mutate(offering.id)}
+                    className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                    aria-label={`Delete ${offering.title}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </Card>
           ))}

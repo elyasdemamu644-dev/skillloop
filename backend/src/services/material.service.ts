@@ -5,6 +5,7 @@ import { prisma } from "../config/database";
 import { ApiError } from "../middleware/error.middleware";
 import { MATERIALS_DIR } from "../utils/multer";
 import { createNotification } from "./notification.service";
+import { InsufficientFundsError, applyWalletEntry } from "./wallet.service";
 import type {
   CreateMaterialInput,
   MaterialListQuery,
@@ -86,7 +87,13 @@ export async function listMaterials(query: MaterialListQuery, viewerId?: string)
   }
 
   return {
-    items: items.map((item) => ({ ...item, purchased: purchasedIds.has(item.id), own: item.teacher.id === viewerId })),
+    items: items.map((item) => ({
+      ...item,
+      // Flatten the relation count so clients get a stable field name.
+      purchaseCount: item._count.purchases,
+      purchased: purchasedIds.has(item.id),
+      own: item.teacher.id === viewerId,
+    })),
     pagination: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
   };
 }
@@ -170,8 +177,17 @@ export async function updateMaterial(
 }
 
 export async function deleteMaterial(userId: string, materialId: string) {
-  const existing = await prisma.material.findFirst({ where: { id: materialId, teacherId: userId }, select: { id: true, fileNames: true } });
+  const existing = await prisma.material.findFirst({
+    where: { id: materialId, teacherId: userId },
+    select: { id: true, fileNames: true, _count: { select: { purchases: true } } },
+  });
   if (!existing) throw new ApiError(404, "Material not found");
+  if (existing._count.purchases > 0) {
+    throw new ApiError(
+      409,
+      "This material has purchases. Hide it instead of deleting it so buyers keep access."
+    );
+  }
   await prisma.material.delete({ where: { id: existing.id } });
   deleteDiskFiles(existing.fileNames);
 }
@@ -207,39 +223,63 @@ export async function purchaseMaterial(buyerId: string, materialId: string) {
 
   const buyer = await prisma.user.findUnique({
     where: { id: buyerId },
-    select: { walletBalance: true, firstName: true, lastName: true },
+    select: { firstName: true, lastName: true },
   });
   if (!buyer) throw new ApiError(404, "User not found");
-  if ((buyer.walletBalance ?? 0) < material.price) {
-    throw new ApiError(400, "Insufficient wallet balance. Top up in Payments first.");
-  }
 
-  const result = await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: buyerId }, data: { walletBalance: { decrement: material.price } } });
-    await tx.user.update({ where: { id: material.teacherId }, data: { walletBalance: { increment: material.price } } });
-    const payment = await tx.payment.create({
-      data: {
-        userId: buyerId,
-        recipientId: material.teacherId,
-        materialId: material.id,
-        amount: material.price,
-        method: "CREDITS",
-        status: "COMPLETED",
-        completedAt: new Date(),
-        description: `Purchase: ${material.title}`,
-      },
-      select: { id: true, status: true },
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.create({
+        data: {
+          userId: buyerId,
+          recipientId: material.teacherId,
+          materialId: material.id,
+          amount: material.price,
+          method: "CREDITS",
+          status: "COMPLETED",
+          completedAt: new Date(),
+          description: `Purchase: ${material.title}`,
+        },
+        select: { id: true, status: true },
+      });
+
+      // Both sides of the purchase go through the ledger, so the transfer is
+      // auditable and the debit guard is atomic (no overdraft when two
+      // purchases race on the same wallet).
+      if (material.price > 0) {
+        await applyWalletEntry(tx, {
+          userId: buyerId,
+          type: "MATERIAL_PURCHASE",
+          amount: -material.price,
+          paymentId: payment.id,
+          description: `Purchase: ${material.title}`,
+        });
+        await applyWalletEntry(tx, {
+          userId: material.teacherId,
+          type: "MATERIAL_SALE",
+          amount: material.price,
+          paymentId: payment.id,
+          description: `Sale: ${material.title}`,
+        });
+      }
+
+      return tx.materialPurchase.create({
+        data: {
+          materialId: material.id,
+          buyerId,
+          paymentId: payment.id,
+          pricePaid: material.price,
+        },
+        select: PURCHASE_SELECT,
+      });
     });
-    return tx.materialPurchase.create({
-      data: {
-        materialId: material.id,
-        buyerId,
-        paymentId: payment.id,
-        pricePaid: material.price,
-      },
-      select: PURCHASE_SELECT,
-    });
-  });
+  } catch (error) {
+    if (error instanceof InsufficientFundsError) {
+      throw new ApiError(400, "Insufficient wallet balance. Top up in Payments first.");
+    }
+    throw error;
+  }
 
   await Promise.all([
     createNotification({

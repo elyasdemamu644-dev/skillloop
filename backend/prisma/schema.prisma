@@ -64,6 +64,7 @@ model User {
   paymentsReceived    Payment[]       @relation("PaymentsReceived")
   teacherMaterials    Material[]      @relation("TeacherMaterials")
   materialPurchases   MaterialPurchase[] @relation("MaterialBuyers")
+  walletTransactions  WalletTransaction[] @relation("WalletTransactions")
 
   @@index([email])
   @@index([username])
@@ -469,6 +470,9 @@ model Review {
   updatedAt   DateTime       @updatedAt
 
   @@unique([authorId, exchangeId])
+  // Session reviews need their own guard: Postgres treats NULLs as distinct,
+  // so the exchange constraint above does not cover rows with sessionId set.
+  @@unique([authorId, sessionId])
   @@index([recipientId])
   @@index([authorId])
   @@index([exchangeId])
@@ -532,8 +536,13 @@ model Notification {
 
 enum PaymentStatus {
   PENDING
+  // Transient states claimed inside the money transaction. A single request
+  // moves a payment PENDING -> PROCESSING (or COMPLETED -> REFUNDING); any
+  // concurrent request then sees the guard fail instead of double-spending.
+  PROCESSING
   COMPLETED
   FAILED
+  REFUNDING
   REFUNDED
 }
 
@@ -541,6 +550,37 @@ enum PaymentMethod {
   CREDITS // paid straight from the wallet
   CARD // mock card top-up
   MANUAL // admin-approved balance credit / offline payment
+}
+
+// Every balance change is written here, so the wallet is an auditable ledger
+// rather than a number that can drift. `amount` is signed: positive credits the
+// wallet, negative debits it. `balanceAfter` makes each entry reconcilable.
+enum WalletTransactionType {
+  TOP_UP
+  TRANSFER_OUT
+  TRANSFER_IN
+  REFUND_OUT
+  REFUND_IN
+  MATERIAL_PURCHASE
+  MATERIAL_SALE
+  ADJUSTMENT
+}
+
+model WalletTransaction {
+  id           String                @id @default(cuid())
+  userId       String
+  user         User                  @relation("WalletTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  paymentId    String?
+  payment      Payment?              @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  type         WalletTransactionType
+  amount       Int
+  balanceAfter Int
+  description  String?
+  createdAt    DateTime              @default(now())
+
+  @@index([userId, createdAt])
+  @@index([paymentId])
+  @@map("wallet_transactions")
 }
 
 model Payment {
@@ -557,12 +597,18 @@ model Payment {
   method      PaymentMethod  @default(CREDITS)
   description String?
   completedAt DateTime?
+  // Set for top-ups once the provider has authorised the charge. Kept internal
+  // (never returned by the payment endpoints); it is how a refund can find the
+  // original charge again.
+  provider    String?
+  providerRef String?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   materialId String?
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
   purchase   MaterialPurchase?
+  transactions WalletTransaction[]
 
   @@index([userId])
   @@index([recipientId])

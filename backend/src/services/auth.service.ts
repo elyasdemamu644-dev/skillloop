@@ -87,7 +87,8 @@ export async function getUserById(userId: string) {
 export async function changePassword(
   userId: string,
   currentPassword: string,
-  newPassword: string
+  newPassword: string,
+  keepRefreshJti?: string | null
 ) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
@@ -100,7 +101,21 @@ export async function changePassword(
   }
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    // A password change must evict every other session: if a refresh token
+    // was stolen, changing the password is the one action the victim takes,
+    // and it has to actually lock the attacker out. The caller's own session
+    // is preserved so they are not logged out of the device they are using.
+    prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(keepRefreshJti ? { jti: { not: keepRefreshJti } } : {}),
+      },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
 }
 
 // Returns the raw token only so the caller can email it / log it in dev.

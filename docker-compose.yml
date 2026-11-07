@@ -1,0 +1,80 @@
+# SkillLoop — one-command deployment.
+#
+#   cp .env.example .env      # then edit the secrets
+#   docker compose up --build
+#
+# The SPA is served at http://localhost:8080, the API at http://localhost:4001.
+# nginx proxies /api and /socket.io to the API, so the browser only ever talks
+# to one origin.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skillloop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: skillloop
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillloop -d skillloop"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4001
+      DATABASE_URL: postgresql://skillloop:${POSTGRES_PASSWORD}@db:5432/skillloop?schema=public
+      # Must match the origin the browser uses (nginx serves the SPA).
+      CLIENT_URL: ${APP_URL:-http://localhost:8080}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: 15m
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?set REFRESH_TOKEN_SECRET in .env}
+      REFRESH_TOKEN_EXPIRES_IN: 30d
+      COOKIE_SECRET: ${COOKIE_SECRET:?set COOKIE_SECRET in .env}
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX: 200
+      # One trusted hop: nginx in front of the API.
+      TRUST_PROXY: 1
+    volumes:
+      # Must match the directory the API writes to (process.cwd()/uploads when
+      # it runs from /app/backend), otherwise uploads are not persisted. A new
+      # named volume inherits this directory's ownership from the image, so the
+      # unprivileged app user can still write to it.
+      - uploads:/app/backend/uploads
+    ports:
+      - "4001:4001"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  db-data:
+  uploads:

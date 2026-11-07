@@ -12,6 +12,13 @@ dist/
 build/
 *.tsbuildinfo
 
+# User-uploaded material files (runtime data, never source)
+backend/uploads/
+
+# Test output
+coverage/
+.vitest/
+
 # Logs
 *.log
 npm-debug.log*

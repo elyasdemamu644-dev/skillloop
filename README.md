@@ -1,481 +1,457 @@
 # SkillLoop
 
-> Learn from people. Teach what you know. Keep the loop going. 🔄
+> Learn from people. Teach what you know. Keep the loop going.
 
-A people-to-people skill-learning marketplace where anyone can be both a
-learner and a teacher.
+A people-to-people skill-learning marketplace. Anyone can teach, anyone can
+learn: publish what you can teach, find someone who teaches what you want to
+learn, book sessions, chat, work through a learning plan, get reviewed — and
+settle up with a credits wallet.
 
-**All 14 phases of the build are now implemented** (see [Build Order](#build-order)):
-auth, a skills catalog, discovery, matching, skill exchanges, sessions,
-messaging, learning plans with challenges/feedback, reviews & achievements,
-real-time notifications, an admin dashboard, a credits-based payments wallet,
-and an AI assistant (recommendations, plan generation, smart mentor matching).
+Fifteen feature phases, 24 database tables, 15 migrations, 32 integration tests.
 
-## Features (Phase 1 — foundation)
+---
 
-- Express API with centralized error handling, security middleware
-  (Helmet, CORS, rate limiting), and a consistent `{ success, data,
-  message }` response shape.
-- Prisma + PostgreSQL connection, with a seed script.
-- Socket.IO server initialized (no event handlers yet — added in the
-  messaging phase).
-- React + Vite frontend that calls the backend `/api/health` endpoint on
-  load to confirm the two apps are wired together correctly.
-- Environment variables validated at startup with Zod — the server
-  refuses to boot with a missing/invalid `.env`.
+## What this project demonstrates
 
-## Features (Phase 2 — authentication)
+This started as a phase-by-phase build and was then hardened into something that
+can actually be deployed. The interesting parts are not the feature list:
 
-- **Register / login** with bcrypt-hashed passwords and Zod-validated
-  input (password complexity, username format, etc.) enforced on the
-  backend regardless of what the frontend already checks.
-- **JWT access + refresh tokens.** The short-lived access token
-  (`JWT_EXPIRES_IN`) is kept in memory on the frontend and sent as
-  `Authorization: Bearer <token>`. The longer-lived refresh token
-  (`REFRESH_TOKEN_EXPIRES_IN`) is stored in an `httpOnly`, `sameSite=lax`
-  cookie scoped to `/api/auth` — JavaScript never touches it.
-- **Refresh token rotation.** Every `/api/auth/refresh` call revokes the
-  old refresh token and issues a new one, so a reused/stolen token breaks
-  the chain instead of staying valid indefinitely. Rows live in the
-  `refresh_tokens` table, so a session can be revoked without touching
-  `JWT_SECRET`.
-- **Silent session restore.** On page load, the frontend calls
-  `/api/auth/refresh` using the cookie alone — if it succeeds, the user
-  stays logged in across page refreshes without re-entering credentials.
-- **Protected routes** on both sides: `requireAuth` middleware on the
-  backend (401 without a valid access token) and a `<ProtectedRoute>`
-  wrapper on the frontend that redirects to `/login`.
-- **Change / forgot / reset password.** Forgot-password always returns
-  the same success message whether or not the email exists (no account
-  enumeration); reset tokens are single-use, expire in 1 hour, and are
-  stored only as a SHA-256 hash. Since there's no email service wired up
-  yet, the raw reset token is returned in the API response *only* in
-  development (`NODE_ENV=development`) so you can test the flow — wire up
-  a real email provider before this reaches production.
-- **Rate limiting** on register/login/forgot-password/reset-password (20
-  requests / 15 min) to slow down credential-guessing.
+**Money that cannot be conjured.** The wallet is an append-only ledger
+(`wallet_transactions`), not a number that gets incremented. Every balance change
+goes through one helper whose debit guard is part of the `UPDATE` statement, so
+the check and the write are a single atomic operation. Completing or refunding a
+payment first *claims* a transient `PROCESSING`/`REFUNDING` state, so two
+concurrent requests cannot double-spend. Refunds reverse the original transfer
+exactly, even when the recipient has already spent the credits — the recipient's
+balance goes negative rather than the system quietly minting credits to cover it.
+The test suite asserts that invariant directly.
 
-## Features (Phase 3 — skills system)
+**Authorization that is checked, not assumed.** A signed JWT is necessary but not
+sufficient: `requireAuth` verifies the account still exists and is active on every
+request, so deactivating a user takes effect immediately instead of whenever their
+access token happens to expire. Ownership checks follow one pattern — a uniform
+`404` for "not yours or not there" — and the shared skill catalog is admin-only.
 
-- **Skill categories.** A browsable catalog seeded with 16 categories
-  (Technology, Business, Languages, Music, Photography, Cooking, Arts,
-  Fitness, Sports, Automotive, Agriculture, Crafts, Education, Career,
-  Home Improvement, Other).
-- **Shared skill catalog.** Each skill belongs to exactly one category
-  (`onDelete: Restrict` so a category with skills can't be deleted), has a
-  unique `name` and `slug`, and is shared by all users — individual users
-  attach it to their profiles via `UserSkill` instead.
-- **User skills.** A user can mark a catalog skill as `TEACH`, `LEARN`, or
-  `BOTH`, with a `level` (Beginner → Expert), `yearsExperience` and a short
-  description. Deleting a user cascades their `UserSkill` rows;
-  `@@unique([userId, skillId])` prevents duplicates.
-- **Ownership enforcement.** `/api/users/me/skills` endpoints only ever act
-  on the authenticated user's own rows — modifying or deleting someone
-  else's entry returns the same 404 as a missing one (no information leak).
-- **Frontend "My Skills" page** at `/skills` (protected): shows
-  "Skills I teach" and "Skills I want to learn" sections, with an
-  Add/Edit modal that lets you pick a skill from the catalog (searchable),
-  choose TEACH/LEARN/BOTH, level, and years of experience, plus inline
-  delete.
+**A provider boundary where a real PSP belongs.** Top-ups go through a
+`PaymentProvider` interface with an idempotent fake adapter, persisted `providerRef`,
+and a refund path. Swapping in Stripe means writing one adapter, not touching the
+ledger.
 
-## Features (Phases 4–6 — discovery, matching, exchanges)
+**Tests that run against a real database.** Not mocks. Vitest + Supertest against
+PostgreSQL, with a guard that refuses to run unless the database name contains
+`_test`.
 
-- **Discovery**: search/filter the skill catalog and browse users by the
-  skills they teach/learn (`/discover`).
-- **Offerings**: public, searchable teaching offers per catalog skill
-  (`/offerings`, `/offerings/browse`) with ONLINE / IN_PERSON / BOTH modes.
-- **Matching**: transparent scoring that ranks teachers for a skill from
-  level, years of experience, verification, session count, and reviews.
-- **Skill exchanges**: request → accept/reject → complete workflow
-  (`/exchanges`), each exchange tied to an offering, with a `@@unique`
-  preventing duplicate requests for the same offering.
+---
 
-## Features (Phase 7 — sessions)
+## Features
 
-- **Availability** (`/availability`): recurring weekly slots and one-off
-  slots per teacher.
-- **Sessions** (`/sessions`): propose/confirm/complete scheduling tied to an
-  accepted exchange, with learner/teacher roles and per-session statuses.
+| Area | What works |
+| --- | --- |
+| **Auth** | Register/login, bcrypt hashing, JWT access token (in memory) + rotating `httpOnly` refresh cookie, silent session restore, change/forgot/reset password, per-route rate limiting |
+| **Catalog** | 16 seeded categories, ~65 skills, admin-managed CRUD, search and filtering |
+| **Profiles** | Users attach skills as TEACH / LEARN / BOTH with level and years of experience |
+| **Discovery** | Browse and search the catalog and the people who teach or want a skill |
+| **Offerings** | Public teaching offers per skill, ONLINE / IN_PERSON / BOTH, retire without deleting |
+| **Exchanges** | Request → accept/reject → complete, with duplicate-request prevention |
+| **Sessions** | Recurring and one-off availability, propose/confirm/cancel/complete, overlap detection |
+| **Messaging** | Private conversations, real-time delivery over Socket.IO, unread counts |
+| **Learning** | Plans, challenges (task/quiz/project/milestone), submissions and review, feedback |
+| **Reputation** | Reviews tied to completed exchanges or sessions, averages, achievements/badges |
+| **Notifications** | In-app inbox with live badge, pushed over the socket |
+| **Admin** | Dashboard stats, user management (activate/deactivate, grant admin), moderation queue |
+| **Wallet** | Credits ledger, simulated card top-ups through a provider boundary, transfers, refunds with a 14-day window, full transaction history |
+| **Materials** | Teachers publish files/links at a credit price; purchases unlock downloads through an authenticated endpoint |
+| **AI assistant** | Offering recommendations, level-aware plan outlines, mentor matching |
 
-## Features (Phase 8 — messaging)
-
-- **Conversations** (`/messages`): private one-on-one chats, optionally
-  context-linked to an exchange.
-- **Socket.IO real-time delivery**: messages arrive live, unread counts come
-  from `/api/conversations/unread-count`, and the send hook pushes the
-  message over the socket to the other participant.
-
-## Features (Phase 9 — learning)
-
-- **Learning plans** (`/learning`): learners create plans for a skill
-  (optionally tied to an exchange with a teacher as author).
-- **Challenges**: TASK / QUIZ / PROJECT / MILESTONE with difficulty, order,
-  and due dates.
-- **Submissions & review**: learners submit work; the plan author/owner
-  approves/rejects and the learner can leave feedback.
-
-## Features (Phase 10 — reputation)
-
-- **Reviews** (`/reputation`): rate a completed exchange or session (one
-  review per author+exchange), update/delete, per-user listings.
-- **Reputation summary**: average rating, distribution, points, and badges.
-- **Achievements**: a seeded catalog with unlock criteria evaluated via
-  `POST /api/achievements/evaluate` (evaluated automatically after key
-  events too).
-
-## Features (Phase 11 — notifications)
-
-- **In-app inbox** (`/notifications`) with unread badge in the navbar.
-- **Real-time push**: socket event `notification` keeps inbox + badge in sync
-  without polling; hooks fire from exchange, session, message, submission,
-  review, achievement, and payment events.
-
-## Features (Phase 12 — admin)
-
-- **Admin dashboard** (`/admin`, admin-only link): overview stats, user
-  management (toggle active/admin), and a moderation queue to delete reviews
-  and feedback.
-- **`requireAdmin` middleware** guards all `/api/admin` routes.
-
-## Features (Phase 13 — payments)
-
-- **Credits wallet** (`/payments`): integer SKILL credits on each user.
-- **Top-ups**: mock CARD/MANUAL top-ups credit the wallet immediately.
-- **Transfers**: paying an accepted exchange sends CREDITS from the payer's
-  wallet to the teacher's wallet (auto-notified), with PENDING →
-  COMPLETED / FAILED lifecycle and refunds that reverse balances.
-
-## Features (Phase 14 — AI assistant)
-
-- **Recommendations** (`/ai`): ranks active offerings against the user's
-  LEARN skills + teacher reputation.
-- **Plan generator**: level-aware learning outline (stages of tasks/quizzes/
-  projects/milestones) for any catalog skill.
-- **Smart matching**: ranks teachers for a skill by teaching level, years of
-  experience, ratings, verified badge, and completed exchanges.
-
-## Tech Stack
-
-**Backend:** Node.js, TypeScript, Express, PostgreSQL, Prisma, JWT,
-bcrypt, Zod, Socket.IO
-**Frontend:** React, TypeScript, Vite, React Router, Tailwind CSS, Axios,
-React Hook Form, Zod, TanStack Query
+---
 
 ## Architecture
 
 ```
 skillloop/
-├── backend/     Express API, Prisma schema & migrations
-└── frontend/    React SPA (Vite)
+├── backend/                  Express + Prisma API
+│   ├── prisma/
+│   │   ├── schema.prisma     24 models
+│   │   ├── migrations/       15 migrations
+│   │   └── seed.ts           idempotent demo data
+│   ├── scripts/grant-admin.ts
+│   ├── src/
+│   │   ├── config/           env validation (Zod), Prisma client
+│   │   ├── controllers/      HTTP layer
+│   │   ├── services/         business logic (the interesting part)
+│   │   ├── middleware/       auth, admin, validation, error handling
+│   │   ├── routes/           one router per feature
+│   │   ├── validators/       Zod schemas
+│   │   ├── sockets/          Socket.IO auth + chat handlers
+│   │   └── utils/
+│   └── tests/                Vitest + Supertest integration suite
+├── frontend/                 React SPA (Vite)
+│   ├── src/pages/            one page per route
+│   ├── src/services/         axios client with refresh-and-retry + feature APIs
+│   └── nginx.conf            SPA + /api + /socket.io proxying
+└── docker-compose.yml        Postgres + API + web
 ```
 
-## Requirements
+### Design decisions worth knowing
 
-- Node.js 20+
-- PostgreSQL 14+ (running locally or via Docker)
-- npm
+**Two tokens, two storage locations.** The access token lives only in memory on
+the client and is sent as `Authorization: Bearer`. The refresh token is an
+`httpOnly`, `sameSite=lax` cookie scoped to `/api/auth`, rotated on every refresh
+and persisted as a row so a single device can be revoked without touching
+`JWT_SECRET`. Access tokens are short-lived (15 minutes default) precisely because
+rotation exists.
 
-## Installation
+**The database is the source of truth for authorization state.** Roles and active
+flags are read from the database, not from token claims, because claims cannot be
+revoked.
+
+**Server-side validation always wins.** Every mutating route parses its body with
+a Zod schema and *replaces* `req.body` with the parsed result, which also strips
+unknown fields (no mass assignment).
+
+**Uploads are private by default.** Material files are never served statically;
+every download goes through an endpoint that checks ownership or purchase. File
+types are allowlisted, and a multipart request that fails validation deletes the
+files multer already wrote.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Runtime | Node.js 20, TypeScript (strict) |
+| API | Express 4, Zod validation, centralized error handling |
+| Data | PostgreSQL 16, Prisma 5 (24 models, 15 migrations) |
+| Auth | JWT access tokens, rotating refresh tokens in `httpOnly` cookies, bcrypt |
+| Realtime | Socket.IO 4 with token-authenticated connections |
+| Web | React 18, Vite 5, React Router 6, TanStack Query 5, Tailwind CSS 3, React Hook Form + Zod |
+| Tests | Vitest 5, Supertest, real PostgreSQL |
+| Deploy | Docker Compose (Postgres + API + nginx-served SPA) |
+
+---
+
+## Quick start (Docker)
+
+Requires Docker with the daemon running.
 
 ```bash
-# From the repo root
-cd backend && npm install
-cd ../frontend && npm install
+cp .env.example .env      # then replace the placeholder secrets
+docker compose up --build
 ```
 
-## Environment Variables
+- Web app: <http://localhost:8080>
+- API: <http://localhost:4001> (`/api/health` for a liveness check)
 
-Copy the example files and fill them in:
+Migrations run automatically when the API container starts. Both images are
+built from the full Debian-based Node image so no `apt-get` runs during the
+build — Prisma's engine and a possible bcrypt compile both have what they need
+already. CI builds both images on every pull request and on every push to
+`main`.
+
+To load demo data:
 
 ```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+docker compose exec api npx prisma db seed
 ```
 
-At minimum, set a real `DATABASE_URL` and long random strings for
-`JWT_SECRET`, `REFRESH_TOKEN_SECRET`, and `COOKIE_SECRET` in
-`backend/.env`. The server refuses to start otherwise. Use different
-random strings for each — generate one with:
+Seeded accounts: `alex@skillloop.app` and `michael@skillloop.app`, password
+`Password123!`.
+
+---
+
+## Local development
+
+Requires Node.js 20+ and PostgreSQL 14+.
+
+```bash
+# 1. Install (npm workspaces — run from the repo root)
+npm install
+
+# 2. Configure
+cp backend/.env.example backend/.env     # set DATABASE_URL and the three secrets
+cp frontend/.env.example frontend/.env   # optional; the Vite proxy handles dev
+
+# 3. Database
+cd backend
+npx prisma migrate deploy
+npm run seed
+cd ..
+
+# 4. Run both apps
+npm run dev
+```
+
+- Web: <http://localhost:5173>
+- API: <http://localhost:4001>
+
+The Vite dev server proxies `/api` to the backend, so the browser talks to a
+single origin in development too.
+
+### Making yourself an admin
+
+There is deliberately no API route that grants admin. Promote an existing
+account from the command line:
+
+```bash
+cd backend
+npm run grant-admin -- you@example.com
+```
+
+---
+
+## Environment variables
+
+### Backend (`backend/.env`)
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `JWT_SECRET` | yes | Long random string |
+| `JWT_EXPIRES_IN` | no | Access token lifetime, default `15m` |
+| `REFRESH_TOKEN_SECRET` | yes | Different long random string |
+| `REFRESH_TOKEN_EXPIRES_IN` | no | Default `30d` |
+| `COOKIE_SECRET` | yes | Signs the refresh cookie |
+| `CLIENT_URL` | no | CORS origin, default `http://localhost:5173` |
+| `PORT` | no | Default `4001` |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | no | Default 15 min / 200 requests |
+| `TRUST_PROXY` | no | Number of proxy hops; set to `1` behind nginx/Docker |
+
+Generate each secret separately:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
-## Database Setup
+### Frontend (`frontend/.env`)
 
-Create a local PostgreSQL database named `skillloop` (or update
-`DATABASE_URL` to point at your own):
+Both are optional in development. Set them when the API is on a different origin
+than the SPA.
 
-```bash
-createdb skillloop
-```
+| Variable | Notes |
+| --- | --- |
+| `VITE_API_URL` | API base including `/api`, e.g. `https://api.example.com/api` |
+| `VITE_WS_URL` | Socket.IO origin, e.g. `https://api.example.com` |
 
-Or with Docker:
-
-```bash
-docker run --name skillloop-db -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=skillloop -p 5432:5432 -d postgres:16
-```
-
-## Prisma Setup
-
-```bash
-cd backend
-npx prisma generate
-npx prisma migrate dev
-```
-
-(For an existing Phase 1–2 database, `prisma migrate dev` picks up the
-baseline migration and the Phase 3 skills migration without re-running the
-original SQL. The migrations folder is the source of truth going forward —
-no `prisma db push`.)
-
-## Seed Database
-
-```bash
-npm run seed
-```
-
-Creates two demo users (`alex@skillloop.app`, `michael@skillloop.app`,
-password `Password123!`) — useful for testing login without going through
-registration every time. In Phase 3+ it also seeds the 16 skill categories
-and ~65 catalog skills, plus teach/learn profiles for the demo users (Alex:
-teaches JavaScript / learns Photography; Michael: teaches Photography /
-learns JavaScript — built so the matching engine can find them in later
-phases). The seed is idempotent and safe to re-run.
-
-## Run Backend
-
-```bash
-cd backend
-npm run dev
-```
-
-API runs at `http://localhost:4001` (see `PORT` in `backend/.env`).
-
-## Run Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-App runs at `http://localhost:5173`.
-
-## API Documentation
-
-| Method | Endpoint                    | Auth required | Description                                     |
-| ------ | ---------------------------- | :------------: | ------------------------------------------------ |
-| GET    | `/api/health`                |      —        | Liveness check                                    |
-| GET    | `/api/health/db`             |      —        | Confirms DB connection is alive                   |
-| POST   | `/api/auth/register`         |      —        | Create an account, returns access token           |
-| POST   | `/api/auth/login`            |      —        | Log in, returns access token                      |
-| POST   | `/api/auth/refresh`          |      —        | Rotate refresh cookie, returns new access token   |
-| POST   | `/api/auth/logout`           |      —        | Revoke refresh token, clear cookie                |
-| GET    | `/api/auth/me`               |      ✓        | Current authenticated user                        |
-| PATCH  | `/api/auth/change-password`  |      ✓        | Change password (requires current one)            |
-| POST   | `/api/auth/forgot-password`  |      —        | Request a password reset token                    |
-| POST   | `/api/auth/reset-password`   |      —        | Reset password using the token                    |
-| GET    | `/api/categories`            |      —        | List skill categories                             |
-| GET    | `/api/categories/:id`        |      —        | Get a single category                             |
-| POST   | `/api/categories`            |      ✓        | Create a category (slug auto-generated)           |
-| PATCH  | `/api/categories/:id`        |      ✓        | Update a category                                 |
-| DELETE | `/api/categories/:id`        |      ✓        | Delete a category (409 if it has skills)          |
-| GET    | `/api/skills`                |      —        | List skills; `?q=` and `?category=` (slug) filter |
-| GET    | `/api/skills/:id`            |      —        | Get a single skill                                |
-| POST   | `/api/skills`                |      ✓        | Create a skill (must reference a category)        |
-| PATCH  | `/api/skills/:id`            |      ✓        | Update a skill                                    |
-| DELETE | `/api/skills/:id`            |      ✓        | Delete a skill (409 if users have it)             |
-| GET    | `/api/users/me/skills`       |      ✓        | Current user's skills (`?type=TEACH|LEARN|BOTH`)  |
-| POST   | `/api/users/me/skills`       |      ✓        | Add a skill to the current user's profile         |
-| PATCH  | `/api/users/me/skills/:id`   |      ✓        | Update one of the current user's skills           |
-| DELETE | `/api/users/me/skills/:id`   |      ✓        | Remove one of the current user's skills           |
-| GET    | `/api/offerings`              |      —        | Browsable offerings (filters, pagination)         |
-| POST   | `/api/offerings`              |      ✓        | Create a teaching offering                        |
-| PATCH  | `/api/offerings/:id`          |      ✓        | Update your offering                              |
-| DELETE | `/api/offerings/:id`          |      ✓        | Delete your offering (409 if it has exchanges)    |
-| GET    | `/api/exchanges`              |      ✓        | My exchanges (incoming/outgoing)                  |
-| POST   | `/api/exchanges`              |      ✓        | Request an exchange with an offering              |
-| PATCH  | `/api/exchanges/:id/status`   |      ✓        | accept/reject/complete (provider/pair rules)      |
-| GET    | `/api/availabilities`         |      ✓        | List my availability slots                        |
-| POST   | `/api/availabilities`         |      ✓        | Create a recurring or one-off slot                |
-| DELETE | `/api/availabilities/:id`     |      ✓        | Remove a slot                                     |
-| GET    | `/api/sessions`               |      ✓        | My sessions; propose/confirm/decline/complete     |
-| GET    | `/api/conversations`          |      ✓        | My conversations (unread counts)                  |
-| POST   | `/api/conversations`          |      ✓        | Open/reuse a conversation, send a message         |
-| GET    | `/api/plans`                  |      ✓        | Learning plans; create/update/delete              |
-| POST   | `/api/challenges`             |      ✓        | Add a challenge to a plan (author/owner)          |
-| POST   | `/api/challenges/:id/submissions` |      ✓    | Submit work for a challenge (owner)               |
-| PATCH  | `/api/challenges/:id/submissions/:submissionId` | ✓ | Review a submission (author/owner)    |
-| POST   | `/api/feedback`               |      ✓        | Leave feedback on a submission/partner            |
-| GET    | `/api/reviews`                |      ✓        | Reviews I wrote / for a user / eligible items     |
-| POST   | `/api/reviews`                |      ✓        | Rate a completed exchange or session              |
-| GET    | `/api/achievements`           |      ✓        | Achievements catalog and my earned badges         |
-| POST   | `/api/achievements/evaluate`  |      ✓        | Re-check badge unlocks                            |
-| GET    | `/api/notifications`          |      ✓        | My notifications + unread count                   |
-| PATCH  | `/api/notifications/:id/read` |      ✓        | Mark a notification read                          |
-| GET    | `/api/admin/stats`            |  ✓ (admin)    | Overview statistics                               |
-| GET    | `/api/admin/users`            |  ✓ (admin)    | List users; PATCH `/users/:id` to toggle state    |
-| GET    | `/api/admin/moderation`       |  ✓ (admin)    | Flagged reviews/feedback to remove                |
-| GET    | `/api/payments/wallet`        |      ✓        | Wallet balance + totals                           |
-| POST   | `/api/payments`               |      ✓        | Create a top-up or transfer                       |
-| POST   | `/api/payments/:id/complete`  |      ✓        | Complete a pending payment                        |
-| POST   | `/api/payments/:id/refund`    |      ✓        | Refund a completed payment                        |
-| GET    | `/api/ai/recommendations`     |      ✓        | Ranked offering recommendations                   |
-| POST   | `/api/ai/generate-plan`       |      ✓        | Generate a learning plan outline                  |
-| GET    | `/api/ai/match`               |      ✓        | Ranked teachers for a skill (`?skillId=`)
-
-### Trying it with curl
-
-```bash
-# Register
-curl -c cookies.txt -X POST http://localhost:4001/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","username":"you","password":"Password123!","firstName":"You","lastName":"There"}'
-
-# Use the returned accessToken as a Bearer token
-curl http://localhost:4001/api/auth/me -H "Authorization: Bearer <accessToken>"
-
-# Refresh (uses the cookie saved above)
-curl -b cookies.txt -c cookies.txt -X POST http://localhost:4001/api/auth/refresh
-```
-
-Later phases add `/api/offerings`, `/api/matches`, `/api/exchanges`,
-`/api/sessions`, `/api/messages`, `/api/notifications`, etc., all following
-the same response envelope (see `backend/src/utils/apiResponse.ts`).
-
-## Authentication
-
-Implemented in full for Phase 2 — see "Features (Phase 2)" above for the
-access/refresh token design. Phase 3 exercises user-owned data protection:
-the `/api/users/me/skills` write endpoints are owner-scoped (you can only
-ever touch your own rows), returning a uniform 404 for rows you don't own.
-Later phases keep the same ownership pattern (offerings, plans, reviews,
-payments) and add role-based authorization via `requireAdmin` in
-`backend/src/middleware/admin.middleware.ts`.
+---
 
 ## Testing
 
-No automated test suite yet. Phase-by-phase manual verification:
+The suite talks to a real PostgreSQL database — the money and concurrency
+invariants are not meaningful against mocks.
 
-**Phase 1**
-```
-✓ npm run dev (backend) starts without throwing env validation errors
-✓ GET /api/health returns { success: true }
-✓ GET /api/health/db returns { success: true }
-✓ npm run dev (frontend) starts and shows the green "API is running" message
-```
+```bash
+# Create a throwaway database and point the tests at it
+createdb skillloop_test
 
-**Phase 2**
-```
-✓ Register a new account via the /register page → redirected to /dashboard
-✓ Registering with an already-used email/username returns a clear 409 error
-✓ Weak passwords are rejected with specific messages, before hitting the server
-✓ Log out, then visiting /dashboard redirects to /login
-✓ Log in with the seeded demo user → redirected to /dashboard
-✓ Wrong password shows "Invalid email or password" (not "wrong password")
-✓ Refresh the page while logged in → still logged in (silent session restore)
-✓ Wait for the access token to expire (or shorten JWT_EXPIRES_IN to "10s" to
-  test quickly) → next API call auto-refreshes and succeeds without logging out
-✓ Change password via PATCH /api/auth/change-password with the wrong current
-  password → 401
-✓ POST /api/auth/forgot-password with a real and a fake email → same success
-  message either way; devResetToken only appears for the real one in dev
-✓ POST /api/auth/reset-password with that token → old password stops working,
-  all existing sessions are revoked
+cd backend
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/skillloop_test?schema=public" \
+  npx prisma migrate deploy
+
+TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/skillloop_test?schema=public" \
+  npm test
 ```
 
-**Phase 3**
-```
-✓ GET /api/categories → 16 categories
-✓ GET /api/skills?q=javascript&category=technology → filtered results
-✓ POST /api/users/me/skills adds a skill (TEACH / LEARN / BOTH)
-✓ POST the same skill again → 409
-✓ POST invalid type "MASTER" → 422 with field errors
-✓ GET /api/users/me/skills without a token → 401
-✓ Another user PATCH/DELETE your skill → 404 (owner-scoped)
-✓ PATCH your own skill → 200, changed level persists
-✓ DELETE your own skill → 200
-✓ DELETE a category that still has skills → 409
-✓ npm run build (backend) and npm run build (frontend) both pass
-```
+The runner truncates every table between files and refuses to start unless the
+database name contains `_test` — a guard rail, since it is destructive by design.
 
-**Phases 4–14**
-```
-✓ Two users: teacher creates an offering → learner discovers and requests an
-  exchange → teacher accepts → learner books a session from the teacher's
-  availability → they chat over Socket.IO with live unread counts
-✓ Teacher creates a learning plan for the learner, adds a challenge, the
-  learner submits, the teacher reviews, the learner leaves feedback
-✓ Learner tops up their wallet, pays the accepted exchange with CREDITS
-  (teacher's balance increases and they get a live notification), then
-  refunds it
-✓ After a completed exchange/session each side can review the other; badges
-  unlock via evaluateAchievements
-✓ Admin user (isAdmin=true) sees the /admin dashboard, can toggle users and
-  remove flagged reviews/feedback
-✓ Notification bell shows an unread badge that updates in real time
-✓ /ai returns ranked recommendations, generates a plan outline, and ranks
-  teachers for a skill
-✓ npx prisma migrate status reports the database is up to date
-✓ npm run build + npm run lint pass in both backend and frontend
-```
+What is covered (32 tests):
 
-## Project Structure
+- **Wallet** — top-up shape and ledger entry, duplicate completion (sequential
+  and concurrent), both ledger sides of a transfer, insufficient-funds failure,
+  concurrent overdraw prevention, refund conservation of total credits, refund
+  window, payer-only refunds.
+- **Authorization** — deactivated accounts rejected immediately, catalog writes
+  admin-only, exchange completion requires a completed session,
+  provider-only accept/reject, one review per author per session, plans cannot be
+  created for unrelated users, feedback requires a real context, upload allowlist.
+- **Materials** — publishing with an upload, `purchased`/`own` flags for the
+  signed-in viewer, ledger entries on both sides of a purchase, insufficient
+  credits refused, download gated on purchase, and a refund revoking access.
+- **Availability** — partial updates (pause a slot without resending its
+  weekday or date), owner scoping, and rejection of ambiguous weekday+date patches.
 
-```
-backend/src/
-├── config/        env loading, Prisma client
-├── controllers/   feature controllers (auth, skills, offerings, exchanges,
-│                  sessions, messages, learning, reputation, notifications,
-│                  admin, payments, ai)
-├── services/      feature services (business logic)
-├── middleware/    error, auth (requireAuth/optionalAuth), requireAdmin, validation
-├── routes/        one router per feature group
-├── validators/    Zod schemas per feature
-├── utils/         asyncHandler, apiResponse, duration, hashToken, slugify
-├── types/         express.d.ts (adds req.user typing)
-├── sockets/       Socket.IO handlers + pushToUser (real-time delivery)
-├── app.ts         Express app assembly
-└── server.ts      HTTP + Socket.IO bootstrap
+CI runs the same suite against a PostgreSQL service container, plus typecheck,
+lint, frontend build, and both Docker image builds.
 
-frontend/src/
-├── components/
-│   ├── auth/      ProtectedRoute.tsx
-│   ├── layout/    Navbar.tsx
-│   └── ui/        FormField.tsx, Button.tsx
-├── context/       AuthContext.tsx (login/register/logout, session restore)
-├── pages/         one page per route (Dashboard, Discover, Offerings,
-│                  Exchanges, Sessions, Messages, Learning, Reputation,
-│                  Notifications, Admin, Payments, AI)
-├── hooks/         useHealthCheck, useNotificationsRealtime
-├── services/      api.ts (axios + token refresh) + feature api modules
-├── utils/         client-side Zod validation helpers
-├── routes/        AppRouter.tsx
-├── types/         feature types (auth, skill, offering, exchange, ...)
-├── App.tsx
-└── main.tsx
-```
+---
 
-## Future Features
+## API
 
-Everything in the [build order](#build-order) is implemented. Likely next
-steps: real payment processing, richer AI (actual generative plan content),
-email notifications, and an automated test suite.
+All responses use the envelope `{ success, data, message }`; errors add
+`errors` (field-level details) and are 4xx/5xx with a human-readable `message`.
+Protected routes take `Authorization: Bearer <accessToken>`.
 
-## Build Order
+### Auth
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| POST | `/api/auth/register` | Returns user + access token, sets refresh cookie |
+| POST | `/api/auth/login` | Same |
+| POST | `/api/auth/refresh` | Rotates the refresh cookie |
+| POST | `/api/auth/logout` | Revokes the refresh token |
+| GET | `/api/auth/me` | Current user |
+| PATCH | `/api/auth/change-password` | Requires current password; signs out other devices |
+| POST | `/api/auth/forgot-password` | Always returns the same message |
+| POST | `/api/auth/reset-password` | Single-use, 1-hour token |
 
-1. **Foundation** ✅
-2. **Authentication** ✅ — register/login/JWT/protected routes
-3. **Skills** ✅ — categories, skills, user skills (teach/learn/both)
-4. **Discovery** ✅ — search, filtering, profiles, offerings
-5. **Matching** ✅ — scoring algorithm, recommendations
-6. **Skill exchange** ✅ — request/accept/reject/complete
-7. **Sessions** ✅ — availability, scheduling, booking
-8. **Messaging** ✅ — Socket.IO conversations
-9. **Learning** ✅ — plans, challenges, submissions, feedback
-10. **Reputation** ✅ — reviews, ratings, achievements
-11. **Notifications** ✅ — real-time inbox + unread badges
-12. **Admin** ✅ — dashboard, moderation, statistics
-13. **Payments** ✅ — credits wallet, top-ups, transfers, refunds
-14. **AI** ✅ — recommendations, plan generation, smart matching
+### Catalog & profiles
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET | `/api/health`, `/api/health/db` | Liveness / database check |
+| GET | `/api/categories`, `/api/categories/:id` | Public |
+| POST/PATCH/DELETE | `/api/categories/...` | **Admin only** |
+| GET | `/api/skills?q=&category=` | Public |
+| POST/PATCH/DELETE | `/api/skills/...` | **Admin only** |
+| GET/POST/PATCH/DELETE | `/api/users/me/skills/...` | Your own teach/learn profile |
+| GET | `/api/users/discover` | Find people by skill |
+
+### Offerings & exchanges
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET | `/api/offerings` | Public, filterable, paginated |
+| GET | `/api/offerings/mine` | Your offerings |
+| POST/PATCH | `/api/offerings/...` | Create/update (PATCH accepts `isActive`) |
+| DELETE | `/api/offerings/:id` | 409 if it has exchanges — retire it instead |
+| GET | `/api/exchanges` | Your exchanges |
+| POST | `/api/exchanges` | Request an offering |
+| PATCH | `/api/exchanges/:id/status` | Provider accepts/rejects; completion needs a completed session |
+
+### Sessions, messaging, learning
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET/POST/PATCH/DELETE | `/api/availabilities/...` | Recurring or one-off slots |
+| GET/POST | `/api/sessions` | List / propose |
+| PATCH | `/api/sessions/:id/status` | confirm / decline / cancel / complete |
+| PATCH | `/api/sessions/:id/reschedule` | Change time |
+| GET/POST | `/api/conversations` | List / open (reuses the pair's thread) |
+| GET/POST | `/api/conversations/:id/messages` | Read / send |
+| GET | `/api/conversations/unread-count` | Badge count |
+| GET/POST/PATCH/DELETE | `/api/plans/...` | Learning plans |
+| POST/PATCH/DELETE | `/api/challenges/...` | Challenges and submissions |
+| POST | `/api/feedback` | Must attach to an exchange or submission |
+
+### Reputation, notifications, admin
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET/POST/PATCH/DELETE | `/api/reviews/...` | One review per author per exchange *or* session |
+| GET | `/api/reviews/eligible` | Completed work you have not reviewed |
+| GET | `/api/reviews/me/summary` | Average, distribution, badges |
+| GET/POST | `/api/achievements/...` | Catalog, mine, evaluate |
+| GET | `/api/notifications`, `/api/notifications/unread-count` | Inbox |
+| PATCH/POST | `/api/notifications/:id/read`, `/mark-all-read` | Mark read |
+| GET | `/api/admin/stats`, `/api/admin/users`, `/api/admin/moderation` | **Admin only** |
+| PATCH | `/api/admin/users/:id` | Toggle active/admin |
+| DELETE | `/api/admin/moderation/reviews/:id`, `.../feedback/:id` | Remove content |
+
+### Wallet & materials
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET | `/api/payments/wallet` | Balance, totals, recent ledger entries |
+| GET | `/api/payments/transactions` | Paginated ledger |
+| GET | `/api/payments` | Payments you sent or received |
+| POST | `/api/payments` | Top-up (`CARD`/`MANUAL`) or transfer (`CREDITS` + `recipientId`) |
+| POST | `/api/payments/:id/complete` | Atomic; refuses duplicates |
+| POST | `/api/payments/:id/refund` | Payer only, 14-day window |
+| GET | `/api/materials` | Public listing (adds `purchased`/`own` when authed) |
+| GET | `/api/materials/mine`, `/api/materials/library` | Your published / purchased |
+| POST/PATCH/DELETE | `/api/materials/...` | Publish and manage (files + links) |
+| POST | `/api/materials/:id/purchase` | Buy with credits |
+| GET | `/api/materials/:id/file/:fileName` | Authenticated download |
+
+### AI
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| GET | `/api/ai/recommendations` | Ranked offerings for your learning goals |
+| POST | `/api/ai/generate-plan` | Level-aware plan outline |
+| GET | `/api/ai/match?skillId=` | Ranked teachers |
+
+### Socket.IO events
+
+Connect with `auth: { token: <accessToken> }`. Invalid or banned accounts are
+rejected during the handshake.
+
+| Direction | Event | Purpose |
+| --- | --- | --- |
+| → | `conversation:start` | Open a thread, optionally with a first message |
+| → | `message:send` | Send a message |
+| → | `conversation:read` | Mark a thread read |
+| ← | `message:new` | A message arrived |
+| ← | `conversation:update` | Thread metadata / unread changed |
+| ← | `notification` | New in-app notification |
+
+---
+
+## Security notes
+
+What is implemented:
+
+- Helmet, CORS locked to `CLIENT_URL`, per-route rate limiting (stricter on auth),
+  `trust proxy` support for correct client IPs behind a reverse proxy.
+- bcrypt password hashing; identical error for unknown email and wrong password;
+  constant success message for password-reset requests (no account enumeration).
+- Refresh-token rotation with server-side revocation; password change and reset
+  both invalidate other sessions.
+- Ownership checks on every user-scoped resource; admin-only catalog and
+  moderation routes; account state (`isActive`, `isAdmin`) read from the database.
+- Zod validation on every mutating route; `.env` validated at boot, server refuses
+  to start with a missing secret.
+- Upload allowlist, 10 MB / 8 file limits, private download endpoint, and cleanup
+  of files written for a request that then fails validation.
+- Atomic, ledger-backed money movements; refunds bounded by a window; no way to
+  create credits without a corresponding debit.
+
+Known limitations — read these before deploying for real:
+
+- **Payments are simulated.** The `FakePaymentProvider` authorises top-ups without
+  moving money. It exists so the wallet, ledger and refund logic are real while the
+  PSP boundary stays swappable. Do not treat credits as money.
+- **No email delivery.** `forgot-password` returns the reset token in the API
+  response when `NODE_ENV=development`. Wire an email provider before production —
+  the `EMAIL_*` variables are reserved for it.
+- **The AI features are deterministic heuristics**, not a language model. They score
+  offerings and teachers from level, experience, ratings and completed exchanges.
+- **Reviews are not moderated before publication.** Admins can remove them after the
+  fact from the moderation queue.
+- **No automated database backups.** A production deployment needs a backup policy
+  for the `db-data` volume.
+
+---
+
+## Scripts
+
+Root (npm workspaces):
+
+| Command | Does |
+| --- | --- |
+| `npm run dev` | Run API and web together |
+| `npm run build` | Build both |
+| `npm run lint` | Lint both |
+| `npm run seed` | Seed demo data |
+| `npm test` | Run the API test suite |
+
+Backend:
+
+| Command | Does |
+| --- | --- |
+| `npm run dev` | `tsx watch` API |
+| `npm run build` / `start` | Compile / run compiled |
+| `npm run test` / `test:watch` | Vitest |
+| `npm run seed` | Idempotent demo data |
+| `npm run grant-admin -- <email>` | Promote an existing account |
+| `npm run prisma:migrate` / `prisma:studio` | Prisma tooling |
+
+---
+
+## Roadmap
+
+- Real PSP adapter (Stripe test mode) behind `PaymentProvider`, with webhooks.
+- Email delivery for password resets and notifications.
+- Admin-managed refunds and a dispute flow instead of payer-initiated refunds.
+- End-to-end browser tests (Playwright) for the critical money journey.
+- Pagination and filtering on the moderation queue.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

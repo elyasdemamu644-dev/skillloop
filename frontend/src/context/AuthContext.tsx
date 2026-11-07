@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, setAccessToken } from "@/services/api";
+import { api, setAccessToken, setSessionExpiredHandler } from "@/services/api";
+import { reconnectSocket } from "@/services/socket";
 import {
   loginRequest,
   logoutRequest,
@@ -38,6 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
         if (cancelled) return;
         setAccessToken(data.data.accessToken);
+        // The socket may already exist from a previous session; make sure the
+        // next one is opened with the token we just obtained.
+        reconnectSocket();
         const currentUser = await fetchCurrentUser();
         if (!cancelled) setUser(currentUser);
       } catch {
@@ -56,15 +60,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // If a silent refresh fails later (account deactivated, refresh token
+  // revoked), drop the signed-in state so the UI stops pretending to be
+  // authenticated and the protected routes redirect to /login.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setAccessToken(null);
+      reconnectSocket();
+      setUser(null);
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
+
   const login = useCallback(async (input: LoginInput) => {
     const session = await loginRequest(input);
     setAccessToken(session.accessToken);
+    reconnectSocket();
     setUser(session.user);
   }, []);
 
   const register = useCallback(async (input: RegisterInput) => {
     const session = await registerRequest(input);
     setAccessToken(session.accessToken);
+    reconnectSocket();
     setUser(session.user);
   }, []);
 
@@ -73,6 +91,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await logoutRequest();
     } finally {
       setAccessToken(null);
+      // Tear the socket down: leaving it connected would keep delivering the
+      // previous user's messages and notifications on a shared device.
+      reconnectSocket();
       setUser(null);
     }
   }, []);

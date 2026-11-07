@@ -16,7 +16,7 @@ import { categoryImage, HERO_IMAGE } from "@/utils/images";
 const STATS = [
   { value: "65+", label: "Skills in the catalog" },
   { value: "1:1", label: "Real people, real lessons" },
-  { value: "14", label: "Phases — fully built out" },
+  { value: "15", label: "Phases — fully built out" },
 ];
 
 const STEPS = [
@@ -52,7 +52,7 @@ const CATEGORIES = [
 ];
 
 const FEATURES = [
-  { icon: <Wallet className="h-5 w-5" />, title: "Credits & payments", text: "A built-in credits wallet for lessons. Top up, pay mentors, refund anytime." },
+  { icon: <Wallet className="h-5 w-5" />, title: "Credits & payments", text: "A built-in credits wallet for lessons. Top up, pay mentors, and refund within 14 days." },
   { icon: <Award className="h-5 w-5" />, title: "Reputation & badges", text: "Ratings, reviews, and achievements that make great teachers shine." },
   { icon: <MessagesSquare className="h-5 w-5" />, title: "Live messaging", text: "Real-time socket chat plus instant notifications — never miss a beat." },
   { icon: <Rocket className="h-5 w-5" />, title: "AI assistant", text: "Personalized recommendations, generated learning plans, and smart matching." },

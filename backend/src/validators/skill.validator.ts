@@ -21,7 +21,12 @@ export const createOfferingSchema = z.object({
   level: skillLevelSchema,
   mode: offeringModeSchema.default("ONLINE"),
 });
-export const updateOfferingSchema = createOfferingSchema.partial().omit({ skillId: true });
+// `isActive` lets a teacher retire an offering that already has exchanges
+// without deleting it (and with it the learner's history).
+export const updateOfferingSchema = createOfferingSchema
+  .partial()
+  .omit({ skillId: true })
+  .extend({ isActive: z.boolean().optional() });
 export const offeringQuerySchema = z.object({
   skillId: z.string().min(1).optional(),
   level: skillLevelSchema.optional(),

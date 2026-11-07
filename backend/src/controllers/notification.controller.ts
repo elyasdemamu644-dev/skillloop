@@ -2,9 +2,11 @@ import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ok } from "../utils/apiResponse";
 import * as notificationService from "../services/notification.service";
+import { notificationQuerySchema } from "../validators/notification.validator";
 
 export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await notificationService.listNotifications(req.user!.id, req.query as never), "Notifications");
+  const query = notificationQuerySchema.parse(req.query);
+  ok(res, await notificationService.listNotifications(req.user!.id, query), "Notifications");
 });
 
 export const unreadCount = asyncHandler(async (req: Request, res: Response) => {

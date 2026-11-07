@@ -32,6 +32,9 @@ export const createAvailabilitySchema = z
   });
 export type CreateAvailabilityInput = z.infer<typeof createAvailabilitySchema>;
 
+// Updates are partial: a caller may send only `isActive` (to pause a slot) or
+// only `startTime`. The one rule that still matters is not sending both kinds
+// of slot at once, which would be ambiguous.
 export const updateAvailabilitySchema = z
   .object({
     dayOfWeek: z.number().int().min(0).max(6).optional(),
@@ -40,8 +43,8 @@ export const updateAvailabilitySchema = z
     endTime: z.string().regex(TIME_24H).optional(),
     isActive: z.boolean().optional(),
   })
-  .refine((data) => (data.dayOfWeek !== undefined) !== (data.date !== undefined), {
-    message: "Provide exactly one of dayOfWeek (recurring) or date (one-off)",
+  .refine((data) => !(data.dayOfWeek !== undefined && data.date !== undefined), {
+    message: "Provide either dayOfWeek (recurring) or date (one-off), not both",
     path: ["dayOfWeek"],
   });
 export type UpdateAvailabilityInput = z.infer<typeof updateAvailabilitySchema>;

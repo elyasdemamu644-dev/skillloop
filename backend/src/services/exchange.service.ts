@@ -77,6 +77,15 @@ export async function updateExchangeStatus(userId: string, exchangeId: string, i
   }
   if (nextStatus === ExchangeStatus.COMPLETED) {
     if (exchange.status !== ExchangeStatus.ACCEPTED) throw new ApiError(409, "Only accepted exchanges can be completed");
+    // An exchange is "completed" once real teaching happened. Requiring a
+    // completed session prevents two accounts from instantly marking an
+    // exchange complete to farm reviews, badges and statistics.
+    const completedSessions = await prisma.session.count({
+      where: { exchangeId: exchange.id, status: "COMPLETED" },
+    });
+    if (completedSessions === 0) {
+      throw new ApiError(409, "Complete at least one session before marking the exchange complete");
+    }
   }
   if (nextStatus === ExchangeStatus.REQUESTED) throw new ApiError(400, "Cannot move an exchange back to requested");
 

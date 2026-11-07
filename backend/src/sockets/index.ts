@@ -1,4 +1,5 @@
 import type { Server } from "socket.io";
+import { prisma } from "../config/database";
 import { verifyAccessToken } from "../services/token.service";
 import { registerChatHandlers } from "./chat";
 
@@ -20,11 +21,21 @@ export function setupSocketServer(io: Server): void {
   socketServer = io;
 
   // Authenticate every connection with the same Bearer access token the REST
-  // API uses. Once inside, each socket joins user:<id> for targeted delivery.
-  io.use((socket, next) => {
+  // API uses, and confirm the account is still active — a socket opened before
+  // a ban must not keep receiving messages. Once inside, each socket joins
+  // user:<id> for targeted delivery.
+  io.use(async (socket, next) => {
     const auth = socket.handshake.auth as { token?: string } | undefined;
     try {
       const payload = verifyAccessToken(auth?.token ?? "");
+      const account = await prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { isActive: true },
+      });
+      if (!account?.isActive) {
+        next(new Error("Unauthorized"));
+        return;
+      }
       socket.data.userId = payload.sub;
       next();
     } catch {

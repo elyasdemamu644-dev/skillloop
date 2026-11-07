@@ -120,7 +120,7 @@ export default function ReputationPage() {
         </Card>
       </section>
 
-      {(myReviews.data?.length ?? 0) > 0 && (
+      {(summary.data?.badges.length ?? 0) > 0 && (
         <section className="mt-8">
           <h2 className="mb-4 font-display text-lg font-bold text-slate-900">My badges</h2>
           <div className="flex flex-wrap gap-3">

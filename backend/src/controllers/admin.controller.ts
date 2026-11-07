@@ -2,13 +2,15 @@ import { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ok } from "../utils/apiResponse";
 import * as adminService from "../services/admin.service";
+import { adminUsersQuerySchema } from "../validators/admin.validator";
 
 export const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
   ok(res, await adminService.dashboardStats(), "Admin dashboard stats");
 });
 
 export const getUsers = asyncHandler(async (req: Request, res: Response) => {
-  ok(res, await adminService.listUsers(req.query as never), "Admin user list");
+  const query = adminUsersQuerySchema.parse(req.query);
+  ok(res, await adminService.listUsers(query), "Admin user list");
 });
 
 export const patchUserStatus = asyncHandler(async (req: Request, res: Response) => {

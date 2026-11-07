@@ -5,12 +5,10 @@ Thank you for considering contributing to SkillLoop! This project is a people-to
 ## Development Setup
 
 1. **Fork the repository** and clone your fork locally
-2. **Install dependencies:**
+2. **Install dependencies** (npm workspaces — one install at the root):
 
    ```bash
    npm install
-   cd backend && npm install
-   cd ../frontend && npm install
    ```
 
 3. **Set up environment variables:**
@@ -28,11 +26,11 @@ Thank you for considering contributing to SkillLoop! This project is a people-to
    createdb skillloop
    cd backend
    npx prisma generate
-   npx prisma migrate dev
+   npx prisma migrate deploy
    npm run seed
    ```
 
-5. **Run the development server:**
+5. **Run the development server** (from the repo root):
 
    ```bash
    npm run dev
@@ -69,6 +67,33 @@ skillloop/
         └── types/       feature types
 ```
 
+## Testing
+
+The API suite runs against a real PostgreSQL database, because the money and
+concurrency invariants are not meaningful against mocks.
+
+```bash
+createdb skillloop_test
+cd backend
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/skillloop_test?schema=public" npx prisma migrate deploy
+
+TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/skillloop_test?schema=public" npm test
+```
+
+The suite truncates every table, and refuses to start unless the database name
+contains `_test`.
+
+Before opening a pull request, these must pass:
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+CI runs the same commands, plus both Docker image builds.
+
 ## Coding Standards
 
 - **TypeScript** is used throughout both frontend and backend
@@ -77,22 +102,27 @@ skillloop/
 - Use **bcrypt** for password hashing
 - Use **JWT** for authentication (access tokens in memory, refresh tokens in httpOnly cookies)
 - Follow the `{ success, data, message }` response shape for all API responses
-- Write meaningful commit messages
+- **Never change a wallet balance directly.** Every movement goes through
+  `applyWalletEntry` in `backend/src/services/wallet.service.ts`, inside a
+  transaction. Add a test for any new money path.
+- Write meaningful commit messages (Conventional Commits: `feat:`, `fix:`, `test:`, `chore:`)
 
 ## Pull Request Process
 
 1. Create a branch from `main`: `git checkout -b feature/your-feature-name`
-2. Make your changes and ensure tests pass (or manually verify the feature works)
-3. Commit your changes with a clear description
-4. Push to your fork and open a Pull Request against the original repository
-5. The maintainers will review and either merge or request changes
+2. Make your changes and make sure the checks above pass — do not open a PR with
+   failing typecheck, lint, or tests
+3. Add tests for new behaviour, especially anything touching money, authorization,
+   or state transitions
+4. Commit your changes with a clear description
+5. Push to your fork and open a Pull Request against the original repository
+6. The maintainers will review and either merge or request changes
 
 ## Adding New Features
 
-1. Check the [Build Order](#build-order) in `README.md` to see which phase you're working on
-2. Follow the existing architecture patterns
-3. Update the `README.md` if the feature changes the public API or user-facing functionality
-4. Add or update tests as appropriate
+1. Follow the existing architecture: route → validator → controller → service
+2. Update the `README.md` if the feature changes the public API or user-facing functionality
+3. Add or update tests as appropriate — a feature without a test is treated as unverified
 
 ## License
 
