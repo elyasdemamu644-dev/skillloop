@@ -27,7 +27,8 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  useNotificationsRealtime();
+  // Only subscribe to notifications when signed in.
+  useNotificationsRealtime(isAuthenticated);
 
   const unread = useQuery({
     queryKey: ["unread-count"],
