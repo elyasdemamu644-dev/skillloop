@@ -1,5 +1,21 @@
-export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+export type PaymentStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED"
+  | "REFUNDING"
+  | "REFUNDED";
 export type PaymentMethod = "CREDITS" | "CARD" | "MANUAL";
+
+export type WalletTransactionType =
+  | "TOP_UP"
+  | "TRANSFER_OUT"
+  | "TRANSFER_IN"
+  | "REFUND_OUT"
+  | "REFUND_IN"
+  | "MATERIAL_PURCHASE"
+  | "MATERIAL_SALE"
+  | "ADJUSTMENT";
 
 export interface PaymentUser {
   id: string;
@@ -29,10 +45,23 @@ export interface Payment {
   exchange: PaymentExchange | null;
 }
 
+// One row of the wallet ledger: every balance change is recorded with the
+// balance it produced, so the history explains the number.
+export interface WalletTransaction {
+  id: string;
+  type: WalletTransactionType;
+  amount: number;
+  balanceAfter: number;
+  description: string | null;
+  paymentId: string | null;
+  createdAt: string;
+}
+
 export interface Wallet {
   balance: number;
-  totalPaid: number;
-  totalReceived: number;
+  totalCredited: number;
+  totalDebited: number;
+  recentTransactions: WalletTransaction[];
 }
 
 export interface PaymentListResponse {

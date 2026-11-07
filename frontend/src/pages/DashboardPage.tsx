@@ -94,7 +94,7 @@ export default function DashboardPage() {
           label="Credits balance"
           value={`CR ${formatBalance(wallet.data?.balance ?? 0)}`}
           icon={<Wallet className="h-5 w-5" />}
-          sub={wallet.data ? `Received ${formatBalance(wallet.data.totalReceived)} · Paid ${formatBalance(wallet.data.totalPaid)}` : undefined}
+          sub={wallet.data ? `Earned ${formatBalance(wallet.data.totalCredited)} · Spent ${formatBalance(wallet.data.totalDebited)}` : undefined}
           accent="brand"
         />
         <StatCard

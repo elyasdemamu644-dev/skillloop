@@ -9,7 +9,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
   JWT_SECRET: z.string().min(10, "JWT_SECRET must be set to a long random string"),
-  JWT_EXPIRES_IN: z.string().default("7d"),
+  // Access tokens are meant to be short-lived: a stolen one stops working in
+  // minutes, and the refresh cookie silently mints a new one. Anything close
+  // to a day defeats that design.
+  JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_SECRET: z.string().min(10, "REFRESH_TOKEN_SECRET must be set"),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default("30d"),
 
@@ -17,6 +20,10 @@ const envSchema = z.object({
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   RATE_LIMIT_MAX: z.coerce.number().default(200),
+
+  // Number of trusted reverse-proxy hops in front of the app (0 = direct).
+  // Set to 1 when running behind Docker/nginx so rate limiting sees real IPs.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 
 const parsed = envSchema.safeParse(process.env);

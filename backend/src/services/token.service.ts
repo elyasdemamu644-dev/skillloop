@@ -81,6 +81,18 @@ export async function rotateRefreshToken(
   return { userId: user.id, accessToken, refreshToken };
 }
 
+// Reads the jti out of a refresh token without requiring it to still be
+// rotatable. Used to keep the caller's own session alive across a password
+// change while every other session is revoked.
+export function readRefreshJti(rawToken: string | undefined): string | null {
+  if (!rawToken) return null;
+  try {
+    return (jwt.verify(rawToken, env.REFRESH_TOKEN_SECRET) as RefreshTokenPayload).jti;
+  } catch {
+    return null;
+  }
+}
+
 // Revokes a single refresh token (used on logout).
 export async function revokeRefreshToken(rawToken: string): Promise<void> {
   try {

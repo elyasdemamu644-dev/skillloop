@@ -17,6 +17,7 @@ import {
   issueRefreshToken,
   rotateRefreshToken,
   revokeRefreshToken,
+  readRefreshJti,
   RefreshTokenError,
 } from "../services/token.service";
 
@@ -87,8 +88,10 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body;
-  await changePasswordService(req.user!.id, currentPassword, newPassword);
-  ok(res, null, "Password changed successfully");
+  // Keep the session that made this request; revoke every other one.
+  const keepJti = readRefreshJti(req.cookies?.[REFRESH_COOKIE_NAME]);
+  await changePasswordService(req.user!.id, currentPassword, newPassword, keepJti);
+  ok(res, null, "Password changed successfully. Other devices have been signed out.");
 });
 
 export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {

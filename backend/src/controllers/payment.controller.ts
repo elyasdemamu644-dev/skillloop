@@ -15,6 +15,14 @@ export const listMyPayments = asyncHandler(async (req: Request, res: Response) =
   );
 });
 
+export const listMyTransactions = asyncHandler(async (req: Request, res: Response) => {
+  ok(
+    res,
+    await paymentService.listMyTransactions(req.user!.id, req.query as never),
+    "My wallet transactions"
+  );
+});
+
 export const createPayment = asyncHandler(async (req: Request, res: Response) => {
   created(res, await paymentService.createPayment(req.user!.id, req.body), "Payment created");
 });

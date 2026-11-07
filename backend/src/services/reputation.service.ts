@@ -84,6 +84,15 @@ export async function createReview(userId: string, input: CreateReviewInput) {
     if (input.recipientId !== other) {
       throw new ApiError(400, "recipientId must be the other participant of the session");
     }
+    // One review per author per session — otherwise a single user can stack
+    // unlimited ratings on the same session and skew the reputation average.
+    const existingSessionReview = await prisma.review.findFirst({
+      where: { authorId: userId, sessionId: input.sessionId },
+      select: { id: true },
+    });
+    if (existingSessionReview) {
+      throw new ApiError(409, "You already reviewed this session");
+    }
     recipientId = other;
   }
 
