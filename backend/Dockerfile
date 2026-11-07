@@ -1,21 +1,21 @@
 # syntax=docker/dockerfile:1
+#
 # Build context is the repository root (npm workspaces share one lockfile).
+#
+# Both stages use the full Debian-based Node image on purpose: it already ships
+# python3 / make / g++ (needed if bcrypt has no prebuilt binary for the
+# platform) and libssl (required by Prisma's query engine). That removes every
+# apt-get from the build, so the image builds even where a Debian mirror is
+# slow or unreachable — only npm needs network.
 
 # ─── Build stage ────────────────────────────────────────────────────────────
-FROM node:20-slim AS build
+FROM node:22-bookworm AS build
 WORKDIR /app
-
-# Prisma needs OpenSSL at generate time; bcrypt may need to compile if no
-# prebuilt binary matches this platform, so the build stage carries a toolchain.
-# (The runtime stage does not — node_modules is copied in already built.)
-RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends openssl python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/package.json
 COPY frontend/package.json ./frontend/package.json
-RUN npm ci && mkdir -p /app/backend/node_modules
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY backend/prisma ./backend/prisma
 COPY backend/tsconfig.json ./backend/tsconfig.json
@@ -23,17 +23,14 @@ COPY backend/src ./backend/src
 RUN cd backend && npx prisma generate && npm run build
 
 # ─── Runtime stage ──────────────────────────────────────────────────────────
-FROM node:20-slim AS runtime
+FROM node:22-bookworm AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
-  && rm -rf /var/lib/apt/lists/*
 
 # node_modules comes from the build stage because the Prisma CLI (a dev
 # dependency) runs at start-up to apply migrations.
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/backend/prisma ./backend/prisma
 COPY --from=build /app/package.json ./package.json

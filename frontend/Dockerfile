@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1
+#
 # Build context is the repository root (npm workspaces share one lockfile).
 
 # ─── Build stage ────────────────────────────────────────────────────────────
-FROM node:20-slim AS build
+FROM node:22-bookworm AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/package.json
 COPY frontend/package.json ./frontend/package.json
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY frontend ./frontend
 RUN cd frontend && npm run build

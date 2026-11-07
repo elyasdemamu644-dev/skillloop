@@ -47,7 +47,11 @@ services:
       # One trusted hop: nginx in front of the API.
       TRUST_PROXY: 1
     volumes:
-      - uploads:/app/uploads
+      # Must match the directory the API writes to (process.cwd()/uploads when
+      # it runs from /app/backend), otherwise uploads are not persisted. A new
+      # named volume inherits this directory's ownership from the image, so the
+      # unprivileged app user can still write to it.
+      - uploads:/app/backend/uploads
     ports:
       - "4001:4001"
     healthcheck:

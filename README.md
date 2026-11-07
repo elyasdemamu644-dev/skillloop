@@ -143,7 +143,12 @@ docker compose up --build
 - Web app: <http://localhost:8080>
 - API: <http://localhost:4001> (`/api/health` for a liveness check)
 
-Migrations run automatically when the API container starts. To load demo data:
+Migrations run automatically when the API container starts. Both images are
+built from the full Debian-based Node image so no `apt-get` runs during the
+build — Prisma's engine and a possible bcrypt compile both have what they need
+already. CI builds both images on every push; `docker build --check` is clean.
+
+To load demo data:
 
 ```bash
 docker compose exec api npx prisma db seed
