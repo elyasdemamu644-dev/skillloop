@@ -7,7 +7,7 @@ learn: publish what you can teach, find someone who teaches what you want to
 learn, book sessions, chat, work through a learning plan, get reviewed — and
 settle up with a credits wallet.
 
-Fifteen feature phases, 24 database tables, 14 migrations, 22 integration tests.
+Fifteen feature phases, 24 database tables, 15 migrations, 22 integration tests.
 
 ---
 
@@ -72,7 +72,7 @@ skillloop/
 ├── backend/                  Express + Prisma API
 │   ├── prisma/
 │   │   ├── schema.prisma     24 models
-│   │   ├── migrations/       14 migrations
+│   │   ├── migrations/       15 migrations
 │   │   └── seed.ts           idempotent demo data
 │   ├── scripts/grant-admin.ts
 │   ├── src/
@@ -122,7 +122,7 @@ files multer already wrote.
 | --- | --- |
 | Runtime | Node.js 20, TypeScript (strict) |
 | API | Express 4, Zod validation, centralized error handling |
-| Data | PostgreSQL 16, Prisma 5 (24 models, 14 migrations) |
+| Data | PostgreSQL 16, Prisma 5 (24 models, 15 migrations) |
 | Auth | JWT access tokens, rotating refresh tokens in `httpOnly` cookies, bcrypt |
 | Realtime | Socket.IO 4 with token-authenticated connections |
 | Web | React 18, Vite 5, React Router 6, TanStack Query 5, Tailwind CSS 3, React Hook Form + Zod |
