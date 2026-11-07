@@ -1,0 +1,20 @@
+{
+  "name": "skillloop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SkillLoop - people-to-people skill-learning marketplace",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "seed": "cd backend && npm run seed",
+    "build": "cd backend && npm run build && cd frontend && npm run build",
+    "lint": "cd backend && npm run lint && cd frontend && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
