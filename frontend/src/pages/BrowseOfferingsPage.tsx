@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { AxiosError } from "axios";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { CalendarPlus, MessageCircle } from "lucide-react";
 import { fetchOfferings } from "@/services/offering.api";
 import { requestExchange } from "@/services/exchange.api";
+import { useAuth } from "@/context/AuthContext";
+import { getApiErrorMessage } from "@/utils/apiError";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
@@ -20,12 +21,36 @@ const MODES = ["ONLINE", "IN_PERSON", "BOTH"];
 export default function BrowseOfferingsPage() {
   const [level, setLevel] = useState("");
   const [mode, setMode] = useState("");
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
   const query = useQuery({
     queryKey: ["offerings", level, mode],
     queryFn: () => fetchOfferings({ level: level || undefined, mode: mode || undefined }),
   });
-  const request = useMutation({ mutationFn: (offeringId: string) => requestExchange(offeringId) });
-  const error = query.error instanceof AxiosError ? ((query.error.response?.data as { message?: string })?.message ?? "Could not load offerings.") : "Could not load offerings.";
+
+  const request = useMutation({
+    mutationFn: (offeringId: string) => requestExchange(offeringId),
+    onSuccess: () => {
+      setMessage({ tone: "success", text: "Request sent. The teacher will accept or decline it." });
+      queryClient.invalidateQueries({ queryKey: ["exchanges"] });
+      queryClient.invalidateQueries({ queryKey: ["my-exchanges"] });
+    },
+    onError: (error: unknown) => setMessage({ tone: "error", text: getApiErrorMessage(error) }),
+  });
+
+  function handleRequest(offeringId: string) {
+    // This page is public; an anonymous visitor has to sign in first.
+    if (!isAuthenticated) {
+      navigate("/login", { state: { from: { pathname: "/offerings/browse" } } });
+      return;
+    }
+    request.mutate(offeringId);
+  }
+
+  const error = query.error ? getApiErrorMessage(query.error) : "Could not load offerings.";
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
@@ -34,6 +59,16 @@ export default function BrowseOfferingsPage() {
         title="Skill Offerings"
         description="Real people, ready to teach. Pick a format that works for you."
       />
+
+      {message && (
+        <p
+          className={`mb-6 rounded-xl px-4 py-3 text-sm ${
+            message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+          }`}
+        >
+          {message.text}
+        </p>
+      )}
 
       <div className="mb-6 flex flex-wrap gap-3">
         <select value={level} onChange={(event) => setLevel(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-soft">
@@ -54,7 +89,7 @@ export default function BrowseOfferingsPage() {
 
       <div className="grid gap-5 md:grid-cols-2">
         {query.data?.items.map((offering) => (
-          <OfferingCard key={offering.id} offering={offering} requesting={request.isPending} onRequest={() => request.mutate(offering.id)} />
+          <OfferingCard key={offering.id} offering={offering} requesting={request.isPending} onRequest={() => handleRequest(offering.id)} />
         ))}
       </div>
     </main>

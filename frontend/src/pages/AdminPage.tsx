@@ -70,7 +70,7 @@ export default function AdminPage() {
       )}
 
       {tab === "overview" && <OverviewTab />}
-      {tab === "users" && <UsersTab onError={handleError} />}
+      {tab === "users" && <UsersTab onError={handleError} currentUserId={user?.id} />}
       {tab === "moderation" && <ModerationTab onError={handleError} />}
     </main>
   );
@@ -153,7 +153,7 @@ function OverviewTab() {
   );
 }
 
-function UsersTab({ onError }: { onError: (message: string) => void }) {
+function UsersTab({ onError, currentUserId }: { onError: (message: string) => void; currentUserId?: string }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const users = useQuery({ queryKey: ["admin-users", query], queryFn: () => fetchAdminUsers({ q: query }) });
@@ -215,8 +215,12 @@ function UsersTab({ onError }: { onError: (message: string) => void }) {
                 <td className="px-3 py-2">
                   <button
                     type="button"
+                    // The API refuses to change your own account status, so
+                    // disable the control instead of offering a guaranteed 400.
+                    disabled={user.id === currentUserId}
+                    title={user.id === currentUserId ? "You cannot change your own account" : undefined}
                     onClick={() => toggle.mutate({ id: user.id, field: "isAdmin", value: !user.isAdmin })}
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
                       user.isAdmin ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-500"
                     }`}
                   >
@@ -226,8 +230,10 @@ function UsersTab({ onError }: { onError: (message: string) => void }) {
                 <td className="px-3 py-2">
                   <button
                     type="button"
+                    disabled={user.id === currentUserId}
+                    title={user.id === currentUserId ? "You cannot change your own account" : undefined}
                     onClick={() => toggle.mutate({ id: user.id, field: "isActive", value: !user.isActive })}
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
                       user.isActive ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
                     }`}
                   >

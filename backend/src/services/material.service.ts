@@ -87,7 +87,13 @@ export async function listMaterials(query: MaterialListQuery, viewerId?: string)
   }
 
   return {
-    items: items.map((item) => ({ ...item, purchased: purchasedIds.has(item.id), own: item.teacher.id === viewerId })),
+    items: items.map((item) => ({
+      ...item,
+      // Flatten the relation count so clients get a stable field name.
+      purchaseCount: item._count.purchases,
+      purchased: purchasedIds.has(item.id),
+      own: item.teacher.id === viewerId,
+    })),
     pagination: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
   };
 }

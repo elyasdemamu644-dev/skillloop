@@ -31,7 +31,17 @@ export default function AIPage() {
         title="Learn smarter with AI"
         description="Recommendations, generated learning plans, and smart mentor matching."
         actions={
-          <Button variant="secondary" onClick={() => queryClient.invalidateQueries({ queryKey: ["ai"] })}>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              // Query keys are "ai/recommendations" and "ai/match" — a plain
+              // ["ai"] invalidation matches neither, so use a prefix predicate.
+              queryClient.invalidateQueries({
+                predicate: (query) =>
+                  Array.isArray(query.queryKey) && String(query.queryKey[0]).startsWith("ai"),
+              })
+            }
+          >
             Refresh
           </Button>
         }

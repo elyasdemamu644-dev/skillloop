@@ -24,6 +24,16 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+// Called when a refresh fails, i.e. the session is genuinely over (account
+// deactivated, refresh token revoked or expired). AuthContext uses it to drop
+// the signed-in shell instead of leaving the app looking logged in while every
+// request 401s.
+let onSessionExpired: (() => void) | null = null;
+
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler;
+}
+
 api.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -68,6 +78,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         setAccessToken(null);
+        onSessionExpired?.();
         return Promise.reject(refreshError);
       }
     }

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, setAccessToken } from "@/services/api";
+import { api, setAccessToken, setSessionExpiredHandler } from "@/services/api";
 import { reconnectSocket } from "@/services/socket";
 import {
   loginRequest,
@@ -58,6 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // If a silent refresh fails later (account deactivated, refresh token
+  // revoked), drop the signed-in state so the UI stops pretending to be
+  // authenticated and the protected routes redirect to /login.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setAccessToken(null);
+      reconnectSocket();
+      setUser(null);
+    });
+    return () => setSessionExpiredHandler(null);
   }, []);
 
   const login = useCallback(async (input: LoginInput) => {
