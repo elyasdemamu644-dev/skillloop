@@ -5,8 +5,11 @@
 FROM node:20-slim AS build
 WORKDIR /app
 
-# Prisma needs OpenSSL at generate time.
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
+# Prisma needs OpenSSL at generate time; bcrypt may need to compile if no
+# prebuilt binary matches this platform, so the build stage carries a toolchain.
+# (The runtime stage does not — node_modules is copied in already built.)
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./

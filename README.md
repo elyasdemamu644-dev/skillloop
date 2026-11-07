@@ -7,7 +7,7 @@ learn: publish what you can teach, find someone who teaches what you want to
 learn, book sessions, chat, work through a learning plan, get reviewed — and
 settle up with a credits wallet.
 
-Fifteen feature phases, 24 database tables, 15 migrations, 22 integration tests.
+Fifteen feature phases, 24 database tables, 15 migrations, 28 integration tests.
 
 ---
 
@@ -249,7 +249,7 @@ TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/skillloop_test?
 The runner truncates every table between files and refuses to start unless the
 database name contains `_test` — a guard rail, since it is destructive by design.
 
-What is covered (22 tests):
+What is covered (28 tests):
 
 - **Wallet** — top-up shape and ledger entry, duplicate completion (sequential
   and concurrent), both ledger sides of a transfer, insufficient-funds failure,
@@ -259,6 +259,9 @@ What is covered (22 tests):
   admin-only, exchange completion requires a completed session,
   provider-only accept/reject, one review per author per session, plans cannot be
   created for unrelated users, feedback requires a real context, upload allowlist.
+- **Materials** — publishing with an upload, `purchased`/`own` flags for the
+  signed-in viewer, ledger entries on both sides of a purchase, insufficient
+  credits refused, download gated on purchase, and a refund revoking access.
 
 CI runs the same suite against a PostgreSQL service container, plus typecheck,
 lint, frontend build, and both Docker image builds.

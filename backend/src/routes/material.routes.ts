@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth.middleware";
+import { optionalAuth, requireAuth } from "../middleware/auth.middleware";
 import { validateBody } from "../middleware/validation.middleware";
 import { uploadMaterials } from "../utils/multer";
 import { createMaterialSchema, updateMaterialSchema } from "../validators/material.validator";
@@ -8,7 +8,9 @@ import * as materialController from "../controllers/material.controller";
 export const materialsRouter = Router();
 
 // Public browsing: only active materials (optionally filtered by skill).
-materialsRouter.get("/", materialController.listMaterials);
+// optionalAuth is what lets a signed-in viewer see which items they already
+// own or purchased — without it those flags were always false.
+materialsRouter.get("/", optionalAuth, materialController.listMaterials);
 // Authed collection routes must come before the /:id param route.
 materialsRouter.get("/library", requireAuth, materialController.listLibrary);
 materialsRouter.get("/mine", requireAuth, materialController.listMyMaterials);
