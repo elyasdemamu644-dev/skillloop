@@ -9,6 +9,20 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the largest third-party libraries into their own chunks: they
+        // change far less often than app code, so browsers keep them cached
+        // across deploys and the entry chunk stays small.
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          "vendor-query": ["@tanstack/react-query"],
+          "vendor-socket": ["socket.io-client"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
